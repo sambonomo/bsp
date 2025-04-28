@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+
+# Local environment & config files
+.env
+.env.*
+!.env.example  # Uncommented to include .env.example in the repo
+.env.local     # Explicitly exclude .env.local
+
+# Firebase hosting cache
+.firestore/indexes.json
+.firestore/collections/
+
+# Firebase emulator data
+.firebase/
+firebase-export-*.json
+
+# Firebase functions
+functions/node_modules/
+functions/lib/
+
+# Firebase debug logs
+firebase-debug.log
+firebase-debug.*.log
+
+# Testing
+coverage/
+
+# OS-specific & editor-specific files
+.DS_Store
+Thumbs.db
+
+# VSCode settings & user preferences
+.vscode/
+
+# IntelliJ IDEA files
+.idea/
+*.iml
+
+# Optional log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependency caches
+.yarn/
+.npm/
+
+# Ignore lockfile of package managers you don't use
+yarn.lock
+# package-lock.json
+
+# If you have Docker/containers
+docker-compose.override.yml

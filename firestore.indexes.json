@@ -1,0 +1,4 @@
+{
+  "status": "error",
+  "error": "Request to https://firestore.googleapis.com/v1/projects/bonomosportspools/databases/(default)/collectionGroups/-/indexes had HTTP Error: 404, Project 'bonomosportspools' or database '(default)' does not exist."
+}

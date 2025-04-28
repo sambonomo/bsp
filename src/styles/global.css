@@ -1,0 +1,290 @@
+/* 1) Global Box Sizing & Minimal Reset */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  /* Rely on MUI's theme for font-family, background-color, and text color */
+  /* background-color is set in MUI theme (default: #FAFAFA light, #0A1323 dark) */
+}
+
+/* Ensure box-sizing is inherited globally */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* 2) Basic Element Styling */
+a {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: none;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+ul, li {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 3) Utility Classes */
+.flex {
+  display: flex;
+}
+
+.flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.align-center {
+  align-items: center;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.justify-around {
+  justify-content: space-around;
+}
+
+.justify-evenly {
+  justify-content: space-evenly;
+}
+
+.m-auto {
+  margin: auto;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-heading {
+  font-family: "Montserrat", sans-serif;
+  font-weight: 700;
+}
+
+.text-body {
+  font-family: "Poppins", sans-serif;
+}
+
+/* Spacing Utilities */
+.p-1 {
+  padding: 0.5rem;
+}
+
+.p-2 {
+  padding: 1rem;
+}
+
+.p-3 {
+  padding: 1.5rem;
+}
+
+.p-4 {
+  padding: 2rem;
+}
+
+.pt-1 {
+  padding-top: 0.5rem;
+}
+
+.pt-2 {
+  padding-top: 1rem;
+}
+
+.pt-3 {
+  padding-top: 1.5rem;
+}
+
+.pt-4 {
+  padding-top: 2rem;
+}
+
+.pb-1 {
+  padding-bottom: 0.5rem;
+}
+
+.pb-2 {
+  padding-bottom: 1rem;
+}
+
+.pb-3 {
+  padding-bottom: 1.5rem;
+}
+
+.pb-4 {
+  padding-bottom: 2rem;
+}
+
+.m-1 {
+  margin: 0.5rem;
+}
+
+.m-2 {
+  margin: 1rem;
+}
+
+.m-3 {
+  margin: 1.5rem;
+}
+
+.m-4 {
+  margin: 2rem;
+}
+
+.mt-1 {
+  margin-top: 0.5rem;
+}
+
+.mt-2 {
+  margin-top: 1rem;
+}
+
+.mt-3 {
+  margin-top: 1.5rem;
+}
+
+.mt-4 {
+  margin-top: 2rem;
+}
+
+.mb-1 {
+  margin-bottom: 0.5rem;
+}
+
+.mb-2 {
+  margin-bottom: 1rem;
+}
+
+.mb-3 {
+  margin-bottom: 1.5rem;
+}
+
+.mb-4 {
+  margin-bottom: 2rem;
+}
+
+/* Gradient Backgrounds */
+.gradient-navy {
+  background: linear-gradient(180deg, #1A2A44 0%, #2A3B5A 100%);
+}
+
+.gradient-light {
+  background: linear-gradient(180deg, #FAFAFA 0%, #E0E0E0 100%);
+}
+
+/* Hover Effects */
+.hover-scale {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.hover-scale:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* Visually Hidden (for screen reader-only content) */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* 4) Scrollbar Styling */
+/* Webkit (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #E0E0E0;
+}
+
+@media (prefers-color-scheme: dark) {
+  ::-webkit-scrollbar-track {
+    background: #2A3B5A;
+  }
+}
+
+::-webkit-scrollbar-thumb {
+  background: #FFD700; /* Gold */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #FFEB3B; /* Yellow */
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #FFD700 #E0E0E0;
+}
+
+@media (prefers-color-scheme: dark) {
+  * {
+    scrollbar-color: #FFD700 #2A3B5A;
+  }
+}
+
+/* 5) Accessibility: Focus Styles */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #FFD700;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(255, 215, 0, 0.3); /* Add a subtle glow for better visibility */
+}
+
+/* 6) Responsive Adjustments */
+@media (max-width: 600px) {
+  h1 {
+    font-size: 2rem;
+  }
+
+  h2 {
+    font-size: 1.8rem;
+  }
+
+  h3 {
+    font-size: 1.5rem;
+  }
+}
+
+/*
+NOTE:
+- Fonts (Montserrat and Poppins) are now loaded via <link> in public/index.html to eliminate @import warning.
+- MUI's CssBaseline and theme overrides handle most resets (e.g., font-family, colors).
+- Use this file for:
+  - Minimal global resets not covered by MUI.
+  - Utility classes for layout, spacing, and effects (e.g., .gradient-navy, .hover-scale).
+  - Scrollbar styling for a consistent look across browsers.
+  - Accessibility enhancements (e.g., focus styles, visually hidden content).
+*/

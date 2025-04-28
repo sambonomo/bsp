@@ -1,0 +1,35 @@
+/* 
+NOTE: These styles are for the logo animation on the LandingPage.
+If the logo animation is no longer used, consider removing App.css and its import in App.js.
+*/
+
+/* Logo styling for the landing page */
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+  transition: transform 0.3s ease;
+}
+
+/* Ensure accessibility: Add focus styles for interactive logos */
+.App-logo:focus-visible {
+  outline: 2px solid #FFD700; /* Matches global focus styles */
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(255, 215, 0, 0.3);
+}
+
+/* Spin animation for the logo */
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Apply spin animation only if user hasn't set 'prefers-reduced-motion' */
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}

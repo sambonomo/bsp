@@ -1,0 +1,12 @@
+/* src/index.css */
+
+/* 
+NOTE: Most styling should now be handled by MUI's CssBaseline (theme/index.js) and global.css.
+This file is kept minimal for legacy overrides (e.g., monospaced font for <code> elements).
+If these styles are no longer needed, consider removing index.css and its import in index.js.
+*/
+
+/* Monospaced font for <code> elements (optional, keep if used) */
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
