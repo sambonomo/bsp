@@ -1,4 +1,12 @@
-import React, { createContext, useState, useEffect, useContext, useMemo, useRef, useCallback } from "react";
+import React, {
+  createContext,
+  useState,
+  useEffect,
+  useContext,
+  useMemo,
+  useRef,
+  useCallback,
+} from "react";
 import { ThemeContext } from "./ThemeContext";
 import {
   createUserWithEmailAndPassword,
@@ -7,13 +15,19 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
+  // Removed signInWithRedirect, getRedirectResult
   sendPasswordResetEmail,
   reauthenticateWithCredential,
   EmailAuthProvider,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp,
+  collection,
+  addDoc,
+} from "firebase/firestore";
 import { getAuthService, getDb, getAnalyticsService } from "../firebase/config";
 import { logEvent } from "firebase/analytics";
 import { Box, Typography, CircularProgress, Fade, Alert } from "@mui/material";
@@ -48,8 +62,12 @@ export function AuthProvider({ children }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [error, setError] = useState(null);
   const [analytics, setAnalytics] = useState(null);
-  const [loadingAnnouncement, setLoadingAnnouncement] = useState("Loading authentication state...");
+  const [loadingAnnouncement, setLoadingAnnouncement] = useState(
+    "Loading authentication state..."
+  );
   const { theme: muiTheme } = useContext(ThemeContext);
+
+  // Track analytics events so they're not duplicated
   const loggedEvents = useRef({
     userLogin: false,
     signupSuccess: false,
@@ -60,15 +78,12 @@ export function AuthProvider({ children }) {
     reauthenticateSuccess: false,
     addOfflineUserSuccess: false,
   });
+
+  // Live region for A11y announcements
   const liveRegionRef = useRef(null);
+
   const auth = getAuthService();
   const db = getDb();
-
-  // ✅ Define isMobile at the top-level of AuthProvider:
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-  // Log version to confirm file update
-  console.log("AuthContext.js - Version: 2025-04-29-v4 - isMobile fix applied");
 
   // Initialize analytics
   useEffect(() => {
@@ -76,7 +91,19 @@ export function AuthProvider({ children }) {
     setAnalytics(analyticsInstance);
   }, []);
 
-  // Create a live region for accessibility announcements
+  // Helper function to log events
+  const logAnalyticsEvent = useCallback(
+    (eventName, data, logKey = null) => {
+      if (!analytics) return;
+      if (logKey && loggedEvents.current[logKey]) return; // Avoid duplicates
+      logEvent(analytics, eventName, data);
+      console.log(`AuthProvider - Logged event: ${eventName}`, data);
+      if (logKey) loggedEvents.current[logKey] = true;
+    },
+    [analytics]
+  );
+
+  // Create a live region for A11y announcements
   useEffect(() => {
     const liveRegion = document.createElement("div");
     liveRegion.setAttribute("aria-live", "polite");
@@ -96,7 +123,7 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // Clear error after a delay
+  // Clear error after 5 seconds
   useEffect(() => {
     if (error) {
       const timer = setTimeout(() => setError(null), 5000);
@@ -104,40 +131,42 @@ export function AuthProvider({ children }) {
     }
   }, [error]);
 
-  // Announce loading state changes for accessibility
+  // Announce loading states
   useEffect(() => {
     if (liveRegionRef.current) {
       liveRegionRef.current.innerText = loadingAnnouncement;
     }
   }, [loadingAnnouncement]);
 
-  // Retry logic for Firebase operations
-  const withRetry = useCallback(async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await callback();
-      } catch (error) {
-        if (analytics) {
-          logEvent(analytics, "firestore_operation_retry", {
+  // Retry logic for Firebase calls
+  const withRetry = useCallback(
+    async (operationName, callback, maxRetries = 3, retryDelayBase = 1000) => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          return await callback();
+        } catch (retryError) {
+          logAnalyticsEvent("firestore_operation_retry", {
             userId: user?.uid || "anonymous",
-            operation,
+            operationName,
             attempt,
-            error_message: error.message,
+            error_message: retryError.message,
             timestamp: new Date().toISOString(),
           });
-          console.log(`AuthProvider - ${operation} retry attempt ${attempt} logged to Firebase Analytics`);
+          if (attempt === maxRetries) {
+            throw retryError;
+          }
+          const delay = Math.pow(2, attempt - 1) * retryDelayBase;
+          console.log(
+            `${operationName} - Attempt ${attempt} failed: ${retryError.message}. Retrying in ${delay}ms...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
-        if (attempt === maxRetries) {
-          throw error;
-        }
-        const delay = Math.pow(2, attempt - 1) * retryDelayBase;
-        console.log(`${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-    }
-  }, [analytics, user?.uid]);
+    },
+    [logAnalyticsEvent, user?.uid]
+  );
 
-  // Initialize auth state with Firebase
+  // Subscribe to onAuthStateChanged
   useEffect(() => {
     console.log("AuthProvider - Initializing auth state...");
     const startTime = Date.now();
@@ -147,87 +176,87 @@ export function AuthProvider({ children }) {
       auth,
       async (authUser) => {
         const duration = Date.now() - startTime;
-        console.log("AuthProvider - onAuthStateChanged completed in", duration, "ms");
+        console.log(
+          "AuthProvider - onAuthStateChanged completed in",
+          duration,
+          "ms"
+        );
         clearTimeout(authTimeout);
 
         if (authUser) {
           try {
+            // Refresh token
             await authUser.getIdToken(true);
             setUser(authUser);
             console.log("AuthProvider - Auth State Changed:", authUser);
-            if (!loggedEvents.current.userLogin && analytics) {
-              logEvent(analytics, "user_login", {
+
+            // Log user login once
+            logAnalyticsEvent(
+              "user_login",
+              {
                 userId: authUser.uid,
                 timestamp: new Date().toISOString(),
                 auth_duration_ms: duration,
-              });
-              console.log("AuthProvider - User login logged to Firebase Analytics");
-              loggedEvents.current.userLogin = true;
-            }
-          } catch (error) {
-            console.error("AuthProvider - Token refresh error:", error);
+              },
+              "userLogin"
+            );
+          } catch (tokenError) {
+            console.error("AuthProvider - Token refresh error:", tokenError);
             setUser(null);
             setError("Failed to verify authentication. Please log in again.");
-            if (analytics) {
-              logEvent(analytics, "token_refresh_failed", {
-                userId: authUser?.uid || "anonymous",
-                error_message: error.message,
-                timestamp: new Date().toISOString(),
-              });
-              console.log("AuthProvider - Token refresh failure logged to Firebase Analytics");
-            }
+            logAnalyticsEvent("token_refresh_failed", {
+              userId: authUser.uid,
+              error_message: tokenError.message,
+              timestamp: new Date().toISOString(),
+            });
           }
         } else {
+          // Not signed in
           setUser(null);
-          loggedEvents.current = {
-            userLogin: false,
-            signupSuccess: false,
-            loginSuccess: false,
-            logoutSuccess: false,
-            googleLoginSuccess: false,
-            passwordResetSuccess: false,
-            reauthenticateSuccess: false,
-            addOfflineUserSuccess: false,
-          };
+          // Reset event logs
+          Object.keys(loggedEvents.current).forEach(
+            (key) => (loggedEvents.current[key] = false)
+          );
         }
         setAuthLoading(false);
         setLoadingAnnouncement("Authentication state loaded");
       },
-      (error) => {
+      (authError) => {
         const duration = Date.now() - startTime;
-        console.error("AuthProvider - Auth State Error:", error);
-        setError("Failed to initialize authentication. Please try refreshing the page.");
+        console.error("AuthProvider - Auth State Error:", authError);
+        setError(
+          "Failed to initialize authentication. Please try refreshing the page."
+        );
         setUser(null);
         setAuthLoading(false);
         setLoadingAnnouncement("Authentication state failed to load");
-        if (analytics) {
-          logEvent(analytics, "auth_state_error", {
-            userId: user?.uid || "anonymous",
-            error_message: error.message || "Unknown error",
-            timestamp: new Date().toISOString(),
-            auth_duration_ms: duration,
-          });
-          console.log("AuthProvider - Auth state error logged to Firebase Analytics");
-        }
+        logAnalyticsEvent("auth_state_error", {
+          userId: user?.uid || "anonymous",
+          error_message: authError.message || "Unknown error",
+          timestamp: new Date().toISOString(),
+          auth_duration_ms: duration,
+        });
       }
     );
 
+    // Timeout for auth init
     authTimeout = setTimeout(() => {
       if (authLoading) {
         const duration = Date.now() - startTime;
-        console.warn("AuthProvider - onAuthStateChanged timed out after", duration, "ms");
+        console.warn(
+          "AuthProvider - onAuthStateChanged timed out after",
+          duration,
+          "ms"
+        );
         setError("Authentication timed out. Please try refreshing the page.");
         setUser(null);
         setAuthLoading(false);
         setLoadingAnnouncement("Authentication state timed out");
-        if (analytics) {
-          logEvent(analytics, "auth_state_timeout", {
-            userId: user?.uid || "anonymous",
-            timeout_duration_ms: duration,
-            timestamp: new Date().toISOString(),
-          });
-          console.log("AuthProvider - Auth state timeout logged to Firebase Analytics");
-        }
+        logAnalyticsEvent("auth_state_timeout", {
+          userId: user?.uid || "anonymous",
+          timeout_duration_ms: duration,
+          timestamp: new Date().toISOString(),
+        });
       }
     }, 10000);
 
@@ -235,66 +264,11 @@ export function AuthProvider({ children }) {
       unsubscribe();
       clearTimeout(authTimeout);
     };
-  }, [analytics, auth, authLoading, user?.uid]);
+  }, [auth, authLoading, user?.uid, logAnalyticsEvent]);
 
-  // Handle redirect results for Google sign-in
-  useEffect(() => {
-    getRedirectResult(auth)
-      .then(async (result) => {
-        if (result) {
-          const newUser = result.user;
-          const userRef = doc(db, "users", newUser.uid);
-          const snapshot = await withRetry("loginWithGoogleRedirect - getDoc", () => getDoc(userRef));
+  // No more getRedirectResult or signInWithRedirect used
 
-          if (!snapshot.exists()) {
-            await withRetry("loginWithGoogleRedirect - setDoc (new user)", () =>
-              setDoc(userRef, {
-                email: newUser.email,
-                displayName: newUser.displayName || newUser.email.split("@")[0],
-                subscriptionTier: "Bronze",
-                createdAt: serverTimestamp(),
-                lastLoginAt: serverTimestamp(),
-              }, { merge: true })
-            );
-            console.log("Google Sign-In Redirect - New user doc created:", newUser.uid);
-          } else {
-            await withRetry("loginWithGoogleRedirect - setDoc (existing user)", () =>
-              setDoc(userRef, {
-                lastLoginAt: serverTimestamp(),
-              }, { merge: true })
-            );
-            console.log("Google Sign-In Redirect - User logged in:", newUser.uid);
-          }
-
-          if (!loggedEvents.current.googleLoginSuccess && analytics) {
-            logEvent(analytics, "google_login_success", {
-              userId: newUser.uid,
-              email: newUser.email,
-              method: "redirect",
-              timestamp: new Date().toISOString(),
-            });
-            console.log("AuthProvider - Google login (redirect) logged to Firebase Analytics");
-            loggedEvents.current.googleLoginSuccess = true;
-          }
-        }
-      })
-      .catch((error) => {
-        console.error("Google Sign-In Redirect Error:", error);
-        const message = getFriendlyErrorMessage(error.code, "Google sign-in failed.");
-        setError(message);
-        if (analytics) {
-          logEvent(analytics, "google_login_failure", {
-            userId: user?.uid || "anonymous",
-            error_message: message,
-            error_code: error.code,
-            method: "redirect",
-            timestamp: new Date().toISOString(),
-          });
-          console.log("AuthProvider - Google login (redirect) failure logged to Firebase Analytics");
-        }
-      });
-  }, [analytics, user?.uid]);
-
+  // Friendly error messages
   const getFriendlyErrorMessage = (errorCode, defaultMessage) => {
     switch (errorCode) {
       case "auth/invalid-email":
@@ -326,100 +300,121 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const signup = useCallback(async (email, password, displayName = "") => {
-    try {
-      setError(null);
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const newUser = userCredential.user;
+  // Signup
+  const signup = useCallback(
+    async (email, password, displayName = "") => {
+      try {
+        setError(null);
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
+        const newUser = userCredential.user;
 
-      const userRef = doc(db, "users", newUser.uid);
-      await withRetry("signup - setDoc", () =>
-        setDoc(userRef, {
-          email: newUser.email,
-          displayName: displayName || newUser.email.split("@")[0],
-          subscriptionTier: "Bronze",
-          createdAt: serverTimestamp(),
-          lastLoginAt: serverTimestamp(),
-        }, { merge: true })
-      );
+        const userRef = doc(db, "users", newUser.uid);
+        await withRetry("signup - setDoc", () =>
+          setDoc(
+            userRef,
+            {
+              email: newUser.email,
+              displayName: displayName || newUser.email.split("@")[0],
+              subscriptionTier: "Bronze",
+              createdAt: serverTimestamp(),
+              lastLoginAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
+        );
 
-      console.log("User signed up and Firestore doc created:", newUser.uid);
+        console.log("User signed up and Firestore doc created:", newUser.uid);
 
-      if (!loggedEvents.current.signupSuccess && analytics) {
-        logEvent(analytics, "signup_success", {
-          userId: newUser.uid,
-          email: newUser.email,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Signup logged to Firebase Analytics");
-        loggedEvents.current.signupSuccess = true;
-      }
+        logAnalyticsEvent(
+          "signup_success",
+          {
+            userId: newUser.uid,
+            email: newUser.email,
+            timestamp: new Date().toISOString(),
+          },
+          "signupSuccess"
+        );
 
-      return newUser;
-    } catch (error) {
-      console.error("Signup Error:", error);
-      const message = getFriendlyErrorMessage(error.code, "Failed to sign up.");
-      setError(message);
-
-      if (analytics) {
-        logEvent(analytics, "signup_failure", {
+        return newUser;
+      } catch (signupError) {
+        console.error("Signup Error:", signupError);
+        const message = getFriendlyErrorMessage(
+          signupError.code,
+          "Failed to sign up."
+        );
+        setError(message);
+        logAnalyticsEvent("signup_failure", {
           userId: user?.uid || "anonymous",
           email,
           error_message: message,
           timestamp: new Date().toISOString(),
         });
-        console.log("AuthProvider - Signup failure logged to Firebase Analytics");
+        throw new Error(message);
       }
+    },
+    [auth, db, user?.uid, withRetry, logAnalyticsEvent]
+  );
 
-      throw new Error(message);
-    }
-  }, [analytics, user?.uid, auth, db]);
-
-  const login = useCallback(async (email, password) => {
-    try {
-      setError(null);
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const loggedInUser = userCredential.user;
-
-      const userRef = doc(db, "users", loggedInUser.uid);
-      await withRetry("login - setDoc", () =>
-        setDoc(userRef, {
-          lastLoginAt: serverTimestamp(),
-        }, { merge: true })
-      );
-
-      console.log("User logged in:", loggedInUser.uid);
-
-      if (!loggedEvents.current.loginSuccess && analytics) {
-        logEvent(analytics, "login_success", {
-          userId: loggedInUser.uid,
+  // Login
+  const login = useCallback(
+    async (email, password) => {
+      try {
+        setError(null);
+        const userCredential = await signInWithEmailAndPassword(
+          auth,
           email,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Login logged to Firebase Analytics");
-        loggedEvents.current.loginSuccess = true;
-      }
+          password
+        );
+        const loggedInUser = userCredential.user;
 
-      return loggedInUser;
-    } catch (error) {
-      console.error("Login Error:", error);
-      const message = getFriendlyErrorMessage(error.code, "Failed to log in.");
-      setError(message);
+        const userRef = doc(db, "users", loggedInUser.uid);
+        await withRetry("login - setDoc", () =>
+          setDoc(
+            userRef,
+            {
+              lastLoginAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
+        );
 
-      if (analytics) {
-        logEvent(analytics, "login_failure", {
+        console.log("User logged in:", loggedInUser.uid);
+
+        logAnalyticsEvent(
+          "login_success",
+          {
+            userId: loggedInUser.uid,
+            email,
+            timestamp: new Date().toISOString(),
+          },
+          "loginSuccess"
+        );
+
+        return loggedInUser;
+      } catch (loginError) {
+        console.error("Login Error:", loginError);
+        const message = getFriendlyErrorMessage(
+          loginError.code,
+          "Failed to log in."
+        );
+        setError(message);
+        logAnalyticsEvent("login_failure", {
           userId: user?.uid || "anonymous",
           email,
           error_message: message,
           timestamp: new Date().toISOString(),
         });
-        console.log("AuthProvider - Login failure logged to Firebase Analytics");
+        throw new Error(message);
       }
+    },
+    [auth, db, user?.uid, withRetry, logAnalyticsEvent]
+  );
 
-      throw new Error(message);
-    }
-  }, [analytics, user?.uid, auth, db]);
-
+  // Logout
   const logout = useCallback(async () => {
     try {
       setError(null);
@@ -427,224 +422,258 @@ export function AuthProvider({ children }) {
       setUser(null);
       console.log("User logged out");
 
-      if (!loggedEvents.current.logoutSuccess && analytics) {
-        logEvent(analytics, "logout_success", {
+      logAnalyticsEvent(
+        "logout_success",
+        {
           userId: user?.uid || "anonymous",
           timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Logout logged to Firebase Analytics");
-        loggedEvents.current.logoutSuccess = true;
-      }
-    } catch (error) {
-      console.error("Logout Error:", error);
-      const message = getFriendlyErrorMessage(error.code, "Failed to log out.");
+        },
+        "logoutSuccess"
+      );
+    } catch (logoutError) {
+      console.error("Logout Error:", logoutError);
+      const message = getFriendlyErrorMessage(
+        logoutError.code,
+        "Failed to log out."
+      );
       setError(message);
-
-      if (analytics) {
-        logEvent(analytics, "logout_failure", {
-          userId: user?.uid || "anonymous",
-          error_message: message,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Logout failure logged to Firebase Analytics");
-      }
-
+      logAnalyticsEvent("logout_failure", {
+        userId: user?.uid || "anonymous",
+        error_message: message,
+        timestamp: new Date().toISOString(),
+      });
       throw new Error(message);
     }
-  }, [analytics, user?.uid, auth]);
+  }, [auth, user?.uid, logAnalyticsEvent]);
 
+  // Login with Google - Always uses Popup now
   const loginWithGoogle = useCallback(async () => {
     const googleProvider = new GoogleAuthProvider();
     try {
       setError(null);
-      // Use popup for desktop, redirect for mobile to avoid COOP issues
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      if (isMobile) {
-        await signInWithRedirect(auth, googleProvider);
-        console.log("Google Sign-In - Initiated redirect");
-      } else {
-        const result = await signInWithPopup(auth, googleProvider);
-        const newUser = result.user;
-        const userRef = doc(db, "users", newUser.uid);
-        const snapshot = await withRetry("loginWithGoogle - getDoc", () => getDoc(userRef));
 
-        if (!snapshot.exists()) {
-          await withRetry("loginWithGoogle - setDoc (new user)", () =>
-            setDoc(userRef, {
+      // Always popup
+      const result = await signInWithPopup(auth, googleProvider);
+      const newUser = result.user;
+      const userRef = doc(db, "users", newUser.uid);
+
+      const snapshot = await withRetry("loginWithGoogle - getDoc", () =>
+        getDoc(userRef)
+      );
+
+      if (!snapshot.exists()) {
+        await withRetry("loginWithGoogle - setDoc (new user)", () =>
+          setDoc(
+            userRef,
+            {
               email: newUser.email,
               displayName: newUser.displayName || newUser.email.split("@")[0],
               subscriptionTier: "Bronze",
               createdAt: serverTimestamp(),
               lastLoginAt: serverTimestamp(),
-            }, { merge: true })
-          );
-          console.log("Google Sign-In - New user doc created:", newUser.uid);
-        } else {
-          await withRetry("loginWithGoogle - setDoc (existing user)", () =>
-            setDoc(userRef, {
+            },
+            { merge: true }
+          )
+        );
+        console.log("Google Sign-In - New user doc created:", newUser.uid);
+      } else {
+        await withRetry("loginWithGoogle - setDoc (existing user)", () =>
+          setDoc(
+            userRef,
+            {
               lastLoginAt: serverTimestamp(),
-            }, { merge: true })
-          );
-          console.log("Google Sign-In - User logged in:", newUser.uid);
-        }
-
-        if (!loggedEvents.current.googleLoginSuccess && analytics) {
-          logEvent(analytics, "google_login_success", {
-            userId: newUser.uid,
-            email: newUser.email,
-            method: "popup",
-            timestamp: new Date().toISOString(),
-          });
-          console.log("AuthProvider - Google login logged to Firebase Analytics");
-          loggedEvents.current.googleLoginSuccess = true;
-        }
-        return newUser;
+            },
+            { merge: true }
+          )
+        );
+        console.log("Google Sign-In - User logged in:", newUser.uid);
       }
-    } catch (error) {
-      console.error("Google Sign-In Error:", error);
-      const message = getFriendlyErrorMessage(error.code, "Google sign-in failed.");
-      setError(message);
 
-      if (analytics) {
-        logEvent(analytics, "google_login_failure", {
-          userId: user?.uid || "anonymous",
-          error_message: message,
-          error_code: error.code,
-          method: isMobile ? "redirect" : "popup",
+      logAnalyticsEvent(
+        "google_login_success",
+        {
+          userId: newUser.uid,
+          email: newUser.email,
+          method: "popup",
           timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Google login failure logged to Firebase Analytics");
-      }
-
-      throw new Error(message);
-    }
-  }, [analytics, user?.uid, auth, db]);
-
-  const resetPassword = useCallback(async (email) => {
-    try {
-      setError(null);
-      await sendPasswordResetEmail(auth, email);
-      console.log("Password reset email sent to:", email);
-
-      if (!loggedEvents.current.passwordResetSuccess && analytics) {
-        logEvent(analytics, "password_reset_success", {
-          email,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Password reset logged to Firebase Analytics");
-        loggedEvents.current.passwordResetSuccess = true;
-      }
-
-      return true;
-    } catch (error) {
-      console.error("Password Reset Error:", error);
-      const message = getFriendlyErrorMessage(error.code, "Failed to send password reset email.");
-      setError(message);
-
-      if (analytics) {
-        logEvent(analytics, "password_reset_failure", {
-          email,
-          error_message: message,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Password reset failure logged to Firebase Analytics");
-      }
-
-      throw new Error(message);
-    }
-  }, [analytics, auth]);
-
-  const reauthenticate = useCallback(async (email, password) => {
-    try {
-      setError(null);
-      if (!auth.currentUser) {
-        const message = "No authenticated user found. Please log in again.";
-        setError(message);
-        throw new Error(message);
-      }
-      const credential = EmailAuthProvider.credential(email, password);
-      await reauthenticateWithCredential(auth.currentUser, credential);
-      console.log("User reauthenticated:", auth.currentUser.uid);
-
-      if (!loggedEvents.current.reauthenticateSuccess && analytics) {
-        logEvent(analytics, "reauthenticate_success", {
-          userId: auth.currentUser.uid,
-          email,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Reauthentication logged to Firebase Analytics");
-        loggedEvents.current.reauthenticateSuccess = true;
-      }
-
-      return true;
-    } catch (error) {
-      console.error("Reauthentication Error:", error);
-      const message = getFriendlyErrorMessage(error.code, "Failed to reauthenticate.");
-      setError(message);
-
-      if (analytics) {
-        logEvent(analytics, "reauthenticate_failure", {
-          userId: user?.uid || "anonymous",
-          email,
-          error_message: message,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Reauthentication failure logged to Firebase Analytics");
-      }
-
-      throw new Error(message);
-    }
-  }, [analytics, user?.uid, auth]);
-
-  const addOfflineUser = useCallback(async (poolId, offlineUserData) => {
-    try {
-      setError(null);
-      const offlineUsersRef = collection(db, "pools", poolId, "offlineUsers");
-      const newOfflineUser = await withRetry("addOfflineUser - addDoc", () =>
-        addDoc(offlineUsersRef, {
-          ...offlineUserData,
-          createdAt: serverTimestamp(),
-          addedBy: user ? user.uid : "anonymous",
-        })
+        },
+        "googleLoginSuccess"
       );
 
-      console.log("Offline user added to pool:", poolId, "ID:", newOfflineUser.id);
-
-      if (!loggedEvents.current.addOfflineUserSuccess && analytics) {
-        logEvent(analytics, "add_offline_user_success", {
-          poolId,
-          offlineUserId: newOfflineUser.id,
-          userId: user?.uid || "anonymous",
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Add offline user logged to Firebase Analytics");
-        loggedEvents.current.addOfflineUserSuccess = true;
+      return newUser;
+    } catch (googleError) {
+      // Specifically handle the user closing the popup
+      if (googleError.code === "auth/popup-closed-by-user") {
+        console.log(
+          "AuthContext - User closed Google sign-in popup before completing."
+        );
+        // No alert, no error. Return null
+        return null;
       }
 
-      return newOfflineUser.id;
-    } catch (error) {
-      console.error("Add Offline User Error:", error);
-      const message = getFriendlyErrorMessage(error.code, "Failed to add offline user to the pool.");
-      setError(message);
+      // For other errors
+      console.error("Google Sign-In Error:", googleError);
+      const friendlyMessage = getFriendlyErrorMessage(
+        googleError.code,
+        "Google sign-in failed."
+      );
 
-      if (analytics) {
-        logEvent(analytics, "add_offline_user_failure", {
+      if (googleError.code === "auth/popup-blocked") {
+        alert("Please enable pop-ups in your browser and try again.");
+      } else {
+        alert(friendlyMessage);
+      }
+
+      setError(friendlyMessage);
+      logAnalyticsEvent("google_login_failure", {
+        userId: user?.uid || "anonymous",
+        error_message: friendlyMessage,
+        error_code: googleError.code,
+        method: "popup",
+        timestamp: new Date().toISOString(),
+      });
+      throw new Error(friendlyMessage);
+    }
+  }, [auth, db, user?.uid, withRetry, logAnalyticsEvent]);
+
+  // Reset password
+  const resetPassword = useCallback(
+    async (email) => {
+      try {
+        setError(null);
+        await sendPasswordResetEmail(auth, email);
+        console.log("Password reset email sent to:", email);
+
+        logAnalyticsEvent(
+          "password_reset_success",
+          {
+            email,
+            timestamp: new Date().toISOString(),
+          },
+          "passwordResetSuccess"
+        );
+
+        return true;
+      } catch (resetError) {
+        console.error("Password Reset Error:", resetError);
+        const message = getFriendlyErrorMessage(
+          resetError.code,
+          "Failed to send password reset email."
+        );
+        setError(message);
+        logAnalyticsEvent("password_reset_failure", {
+          email,
+          error_message: message,
+          timestamp: new Date().toISOString(),
+        });
+        throw new Error(message);
+      }
+    },
+    [auth, logAnalyticsEvent]
+  );
+
+  // Reauthenticate
+  const reauthenticate = useCallback(
+    async (email, password) => {
+      try {
+        setError(null);
+        if (!auth.currentUser) {
+          const message = "No authenticated user found. Please log in again.";
+          setError(message);
+          throw new Error(message);
+        }
+        const credential = EmailAuthProvider.credential(email, password);
+        await reauthenticateWithCredential(auth.currentUser, credential);
+        console.log("User reauthenticated:", auth.currentUser.uid);
+
+        logAnalyticsEvent(
+          "reauthenticate_success",
+          {
+            userId: auth.currentUser.uid,
+            email,
+            timestamp: new Date().toISOString(),
+          },
+          "reauthenticateSuccess"
+        );
+
+        return true;
+      } catch (reauthError) {
+        console.error("Reauthentication Error:", reauthError);
+        const message = getFriendlyErrorMessage(
+          reauthError.code,
+          "Failed to reauthenticate."
+        );
+        setError(message);
+        logAnalyticsEvent("reauthenticate_failure", {
+          userId: user?.uid || "anonymous",
+          email,
+          error_message: message,
+          timestamp: new Date().toISOString(),
+        });
+        throw new Error(message);
+      }
+    },
+    [auth, user?.uid, logAnalyticsEvent]
+  );
+
+  // Add an offline user to a given pool
+  const addOfflineUser = useCallback(
+    async (poolId, offlineUserData) => {
+      try {
+        setError(null);
+        const offlineUsersRef = collection(db, "pools", poolId, "offlineUsers");
+        const newOfflineUser = await withRetry("addOfflineUser - addDoc", () =>
+          addDoc(offlineUsersRef, {
+            ...offlineUserData,
+            createdAt: serverTimestamp(),
+            addedBy: user ? user.uid : "anonymous",
+          })
+        );
+
+        console.log(
+          "Offline user added to pool:",
+          poolId,
+          "ID:",
+          newOfflineUser.id
+        );
+
+        logAnalyticsEvent(
+          "add_offline_user_success",
+          {
+            poolId,
+            offlineUserId: newOfflineUser.id,
+            userId: user?.uid || "anonymous",
+            timestamp: new Date().toISOString(),
+          },
+          "addOfflineUserSuccess"
+        );
+
+        return newOfflineUser.id;
+      } catch (offlineError) {
+        console.error("Add Offline User Error:", offlineError);
+        const message = getFriendlyErrorMessage(
+          offlineError.code,
+          "Failed to add offline user to the pool."
+        );
+        setError(message);
+        logAnalyticsEvent("add_offline_user_failure", {
           poolId,
           userId: user?.uid || "anonymous",
           error_message: message,
           timestamp: new Date().toISOString(),
         });
-        console.log("AuthProvider - Add offline user failure logged to Firebase Analytics");
+        throw new Error(message);
       }
+    },
+    [db, user?.uid, withRetry, logAnalyticsEvent]
+  );
 
-      throw new Error(message);
-    }
-  }, [analytics, user?.uid, db]);
-
+  // Clears error
   const clearError = useCallback(() => {
     setError(null);
   }, []);
 
+  // Memoize context value
   const value = useMemo(
     () => ({
       user,
@@ -659,9 +688,22 @@ export function AuthProvider({ children }) {
       clearError,
       addOfflineUser,
     }),
-    [user, authLoading, error, signup, login, logout, loginWithGoogle, resetPassword, reauthenticate, clearError, addOfflineUser]
+    [
+      user,
+      authLoading,
+      error,
+      signup,
+      login,
+      logout,
+      loginWithGoogle,
+      resetPassword,
+      reauthenticate,
+      clearError,
+      addOfflineUser,
+    ]
   );
 
+  // If still loading
   return (
     <AuthContext.Provider value={value}>
       {authLoading ? (
@@ -680,11 +722,16 @@ export function AuthProvider({ children }) {
             aria-label="Bonomo Sports Pools is loading authentication state"
           >
             {error && (
-              <Alert severity="error" sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }}>
+              <Alert
+                severity="error"
+                sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }}
+              >
                 {error}
               </Alert>
             )}
-            <CircularProgress sx={{ color: muiTheme.palette.secondary.main, mb: 2 }} />
+            <CircularProgress
+              sx={{ color: muiTheme.palette.secondary.main, mb: 2 }}
+            />
             <Typography
               variant="h6"
               sx={{

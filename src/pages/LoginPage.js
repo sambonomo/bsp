@@ -267,15 +267,20 @@ function LoginPage() {
       await withRetry("Set Persistence (Google)", () => setPersistence(auth, persistenceType));
       console.log(`LoginPage - Set persistence to ${rememberMe ? "LOCAL" : "SESSION"} for Google login`);
 
-      // Use loginWithGoogle from AuthContext, which now uses signInWithRedirect
+      // Use loginWithGoogle from AuthContext, which uses signInWithRedirect
+      setSuccessMessage("Redirecting to Google sign-in...");
       await withRetry("Google Login", () => loginWithGoogle());
-      // Note: No further action needed here; redirect result is handled in AuthContext.js
+      // Note: Redirect result is handled in AuthContext.js
     } catch (err) {
       let userFriendlyError = "Failed to log in with Google. Please try again.";
       if (err.code === "auth/too-many-requests") {
         userFriendlyError = "Too many attempts. Please try again later.";
       } else if (err.code === "auth/network-request-failed") {
         userFriendlyError = "Network error. Please check your connection and try again.";
+      } else if (err.code === "auth/popup-blocked") {
+        userFriendlyError = "Sign-in popup was blocked. Please allow popups for this site and try again.";
+      } else if (err.code === "auth/popup-closed-by-user") {
+        userFriendlyError = "Sign-in popup was closed. Please keep the popup open to complete login.";
       }
       setError(userFriendlyError);
       if (analytics) {

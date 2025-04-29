@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useCallback } from "react";
 import ReactDOM from "react-dom/client";
 import { HelmetProvider } from "react-helmet-async";
 import { BrowserRouter } from "react-router-dom";
@@ -11,44 +11,46 @@ import { getAnalyticsService } from "./firebase/config";
 import { logEvent } from "firebase/analytics";
 import ErrorBoundary from "./components/common/ErrorBoundary";
 
-// Wrapper component to handle analytics initialization and global error handling
 function RootApp() {
   const analytics = getAnalyticsService();
   const hasLoggedAppInit = useRef(false);
 
+  /**
+   * Helper function to log analytics events to Firebase.
+   * Automatically checks if analytics is available.
+   */
+  const logAnalyticsEvent = useCallback((eventName, data) => {
+    if (!analytics) return;
+    logEvent(analytics, eventName, data);
+    console.log(`index.js - Logged event: ${eventName}`, data);
+  }, [analytics]);
+
   // Log app initialization (only once)
   useEffect(() => {
-    if (analytics && !hasLoggedAppInit.current) {
-      logEvent(analytics, "app_initialized", {
+    if (!hasLoggedAppInit.current && analytics) {
+      logAnalyticsEvent("app_initialized", {
         timestamp: new Date().toISOString(),
       });
-      console.log("index.js - App initialization logged to Firebase Analytics");
       hasLoggedAppInit.current = true;
     }
-  }, [analytics]);
+  }, [analytics, logAnalyticsEvent]);
 
   // Global error handling for unhandled errors
   useEffect(() => {
     const handleError = (event) => {
       console.error("index.js - Unhandled Error:", event.error);
-      if (analytics) {
-        logEvent(analytics, "unhandled_error", {
-          error_message: event.error?.message || "Unknown error",
-          timestamp: new Date().toISOString(),
-        });
-        console.log("index.js - Unhandled error logged to Firebase Analytics");
-      }
+      logAnalyticsEvent("unhandled_error", {
+        error_message: event.error?.message || "Unknown error",
+        timestamp: new Date().toISOString(),
+      });
     };
 
     const handleRejection = (event) => {
       console.error("index.js - Unhandled Promise Rejection:", event.reason);
-      if (analytics) {
-        logEvent(analytics, "unhandled_promise_rejection", {
-          error_message: event.reason?.message || "Unknown promise rejection",
-          timestamp: new Date().toISOString(),
-        });
-        console.log("index.js - Unhandled promise rejection logged to Firebase Analytics");
-      }
+      logAnalyticsEvent("unhandled_promise_rejection", {
+        error_message: event.reason?.message || "Unknown promise rejection",
+        timestamp: new Date().toISOString(),
+      });
     };
 
     window.addEventListener("error", handleError);
@@ -58,29 +60,28 @@ function RootApp() {
       window.removeEventListener("error", handleError);
       window.removeEventListener("unhandledrejection", handleRejection);
     };
-  }, [analytics]);
+  }, [logAnalyticsEvent]);
 
+  // Render the main application
   return <App />;
 }
 
 // Create the root element for rendering
 const root = ReactDOM.createRoot(document.getElementById("root"));
 
-// Render the app with all necessary providers
 root.render(
-  // StrictMode enables additional checks in development (disabled in production by CRA)
+  /**
+   * React Strict Mode:
+   * - Helps catch potential issues in development
+   * - May cause certain useEffects to run twice locally
+   * - Does not affect production builds
+   */
   <React.StrictMode>
-    {/* ErrorBoundary catches unhandled errors in the component tree */}
     <ErrorBoundary>
-      {/* HelmetProvider enables dynamic head management (e.g., for SEO) */}
       <HelmetProvider>
-        {/* ThemeProvider provides MUI theme context */}
         <ThemeProvider>
-          {/* BrowserRouter enables client-side routing */}
           <BrowserRouter>
-            {/* AuthProvider manages authentication state */}
             <AuthProvider>
-              {/* SubscriptionProvider manages subscription state */}
               <SubscriptionProvider>
                 <RootApp />
               </SubscriptionProvider>

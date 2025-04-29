@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useThemeContext } from "../contexts/ThemeContext";
 import { useAuth } from "../contexts/AuthContext";
 import { getDb, getAnalyticsService } from "../firebase/config";
-import { addDoc, collection, serverTimestamp, query, where, getDocs, setDoc, doc } from "firebase/firestore";
+import { addDoc, collection, serverTimestamp, doc, setDoc } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { logEvent } from "firebase/analytics";
 import { Link as RouterLink } from "react-router-dom";
@@ -35,14 +35,16 @@ import SchoolIcon from "@mui/icons-material/School";
 import SportsGolfIcon from "@mui/icons-material/SportsGolf";
 import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
-import InfoIcon from "@mui/icons-material/Info";
 import ShareIcon from "@mui/icons-material/Share";
 
-// Styled components for polished UI
+// Removed unused import:
+// import InfoIcon from "@mui/icons-material/Info";
+
 const WizardContainer = styled(Box)(({ theme }) => ({
-  background: theme.palette.mode === "dark"
-    ? "linear-gradient(180deg, #1A2A44 0%, #2A3B5A 100%)"
-    : "linear-gradient(180deg, #F5F5F5 0%, #E0E0E0 100%)",
+  background:
+    theme.palette.mode === "dark"
+      ? "linear-gradient(180deg, #1A2A44 0%, #2A3B5A 100%)"
+      : "linear-gradient(180deg, #F5F5F5 0%, #E0E0E0 100%)",
   minHeight: "100vh",
   py: { xs: 6, md: 8 },
   px: { xs: 2, md: 4 },
@@ -78,15 +80,15 @@ const SelectionCard = styled(Card)(({ theme, disabled }) => ({
       ? "#3A4B6A"
       : "#E0E0E0"
     : theme.palette.mode === "dark"
-      ? "#2A3B5A"
-      : "#FFFFFF",
+    ? "#2A3B5A"
+    : "#FFFFFF",
   color: disabled
     ? theme.palette.mode === "dark"
       ? "#B0BEC5"
       : "#555555"
     : theme.palette.mode === "dark"
-      ? "#FFFFFF"
-      : "#0B162A",
+    ? "#FFFFFF"
+    : "#0B162A",
   textAlign: "center",
   padding: theme.spacing(3),
   cursor: disabled ? "not-allowed" : "pointer",
@@ -109,7 +111,7 @@ const StyledButton = styled(Button)(({ theme }) => ({
   backgroundColor: "#FFD700",
   color: "#0B162A",
   fontWeight: 600,
-  fontFamily: "'Poppins', sans-serif'",
+  fontFamily: "'Poppins', sans-serif",
   fontSize: "1rem",
   px: 4,
   py: 1.5,
@@ -146,17 +148,12 @@ const FORMATS = [
 ];
 
 /**
- * Main component to encapsulate navigation logic for creating a new pool.
- * @param {Object} props - Component props.
- * @param {Object} props.user - The authenticated user object.
- * @param {boolean} props.authLoading - Indicates if authentication state is loading.
- * @param {string} props.mode - The current theme mode ("light" or "dark").
- * @param {Object} props.location - The current location object from react-router.
- * @returns {JSX.Element} The rendered wizard content.
+ * Main Wizard Content
  */
 function WizardContent({ user, authLoading, mode, location }) {
   const isDarkMode = mode === "dark";
   const navigate = useNavigate();
+
   const [activeStep, setActiveStep] = useState(0);
   const [selectedSport, setSelectedSport] = useState(null);
   const [selectedFormat, setSelectedFormat] = useState(null);
@@ -167,6 +164,7 @@ function WizardContent({ user, authLoading, mode, location }) {
   const [newPoolId, setNewPoolId] = useState(null);
   const [inviteCode, setInviteCode] = useState(null);
   const [analytics, setAnalytics] = useState(null);
+
   const hasLoggedPageView = useRef(false);
   const hasLoggedSportPreselected = useRef(false);
   const hasLoggedSportSelected = useRef(false);
@@ -177,6 +175,7 @@ function WizardContent({ user, authLoading, mode, location }) {
   const hasLoggedShareInvite = useRef(false);
   const hasLoggedStripsInitialized = useRef(false);
   const hasLoggedSquaresInitialized = useRef(false);
+
   const db = getDb();
   const functions = getFunctions();
 
@@ -214,6 +213,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     const params = new URLSearchParams(location.search);
     const sportKey = params.get("sport");
     const formatKey = params.get("format");
+
     if (sportKey) {
       const sport = SPORTS.find((s) => s.key === sportKey);
       if (sport) {
@@ -225,7 +225,9 @@ function WizardContent({ user, authLoading, mode, location }) {
             sportKey,
             timestamp: new Date().toISOString(),
           });
-          console.log("CreatePoolWizard - Sport preselection logged to Firebase Analytics");
+          console.log(
+            "CreatePoolWizard - Sport preselection logged to Firebase Analytics"
+          );
           hasLoggedSportPreselected.current = true;
         }
       }
@@ -241,52 +243,49 @@ function WizardContent({ user, authLoading, mode, location }) {
             formatKey,
             timestamp: new Date().toISOString(),
           });
-          console.log("CreatePoolWizard - Format preselection logged to Firebase Analytics");
+          console.log(
+            "CreatePoolWizard - Format preselection logged to Firebase Analytics"
+          );
           hasLoggedFormatSelected.current = true;
         }
       }
     }
   }, [authLoading, user, location.search, navigate, analytics]);
 
-  /**
-   * Retries an asynchronous operation with exponential backoff.
-   * @param {string} operation - Name of the operation for logging purposes.
-   * @param {Function} callback - The async function to retry.
-   * @param {number} [maxRetries=3] - Maximum number of retry attempts.
-   * @param {number} [retryDelayBase=1000] - Base delay in milliseconds for exponential backoff.
-   * @returns {Promise<any>} The result of the callback function.
-   * @throws {Error} If all retries fail, throws the last error encountered.
-   */
-  const withRetry = useCallback(async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await callback();
-      } catch (error) {
-        if (analytics) {
-          logEvent(analytics, "firebase_operation_retry", {
-            userId: user?.uid || "anonymous",
-            operation,
-            attempt,
-            error_message: error.message,
-            timestamp: new Date().toISOString(),
-          });
-          console.log(`CreatePoolWizard - ${operation} retry attempt ${attempt} logged to Firebase Analytics`);
+  // Retry helper
+  const withRetry = useCallback(
+    async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          return await callback();
+        } catch (error) {
+          if (analytics) {
+            logEvent(analytics, "firebase_operation_retry", {
+              userId: user?.uid || "anonymous",
+              operation,
+              attempt,
+              error_message: error.message,
+              timestamp: new Date().toISOString(),
+            });
+            console.log(
+              `CreatePoolWizard - ${operation} retry attempt ${attempt} logged to Firebase Analytics`
+            );
+          }
+          if (attempt === maxRetries) {
+            throw error;
+          }
+          const delay = Math.pow(2, attempt - 1) * retryDelayBase;
+          console.log(
+            `${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
-        if (attempt === maxRetries) {
-          throw error;
-        }
-        const delay = Math.pow(2, attempt - 1) * retryDelayBase;
-        console.log(`${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-    }
-  }, [analytics, user]);
+    },
+    [analytics, user]
+  );
 
-  /**
-   * Sanitizes input by removing HTML tags and special characters.
-   * @param {string} input - The input string to sanitize.
-   * @returns {string} The sanitized string.
-   */
+  // Sanitizes input
   const sanitizeInput = useCallback((input) => {
     const sanitized = input
       .replace(/<[^>]*>/g, "")
@@ -305,11 +304,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     return sanitized;
   }, []);
 
-  /**
-   * Validates the pool name to ensure it contains only allowed characters.
-   * @param {string} name - The pool name to validate.
-   * @returns {boolean} True if the pool name is valid, false otherwise.
-   */
+  // Validates pool name
   const validatePoolName = useCallback((name) => {
     const regex = /^[a-zA-Z0-9\s.,!?-]+$/;
     return regex.test(name);
@@ -349,6 +344,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     });
   }, [analytics, user]);
 
+  // Validate step data before moving forward
   const handleNextStepValidation = useCallback(() => {
     setError("");
     if (activeStep === 0 && !selectedSport) {
@@ -365,7 +361,9 @@ function WizardContent({ user, authLoading, mode, location }) {
         return;
       }
       if (!validatePoolName(poolName)) {
-        setError("Pool Name can only contain letters, numbers, spaces, and basic punctuation (.,!?-).");
+        setError(
+          "Pool Name can only contain letters, numbers, spaces, and basic punctuation (.,!?-)."
+        );
         return;
       }
       if (poolName.length > 100) {
@@ -376,11 +374,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     handleNext();
   }, [activeStep, selectedSport, selectedFormat, poolName, validatePoolName, handleNext]);
 
-  /**
-   * Generates a unique invite code using a Cloud Function.
-   * @returns {Promise<string>} The generated invite code.
-   * @throws {Error} If the Cloud Function fails to generate a unique code.
-   */
+  // Generate invite code via Cloud Function
   const generateUniqueInviteCode = useCallback(async () => {
     try {
       const generateInviteCode = httpsCallable(functions, "generateInviteCode");
@@ -393,36 +387,37 @@ function WizardContent({ user, authLoading, mode, location }) {
           inviteCode,
           timestamp: new Date().toISOString(),
         });
-        console.log("CreatePoolWizard - Invite code generation logged to Firebase Analytics");
+        console.log(
+          "CreatePoolWizard - Invite code generation logged to Firebase Analytics"
+        );
       }
-
       return inviteCode;
     } catch (err) {
       throw new Error("Failed to generate invite code: " + err.message);
     }
   }, [analytics, user?.uid, functions]);
 
-  /**
-   * Creates a new pool in Firestore and initializes format-specific data.
-   * @returns {Promise<void>}
-   */
+  // Create the pool
   const handleCreatePool = useCallback(async () => {
     if (!user) {
       setError("You must be logged in to create a pool.");
       return;
     }
     if (!selectedSport || !selectedFormat || !poolName.trim()) {
-      setError("Missing required fields: sport, format, and pool name are required.");
+      setError(
+        "Missing required fields: sport, format, and pool name are required."
+      );
       return;
     }
 
     try {
       setCreating(true);
       setError("");
+
       const inviteCode = await generateUniqueInviteCode();
       const sanitizedPoolName = sanitizeInput(poolName);
 
-      // Validate field lengths to match Firestore rules
+      // Validate field lengths
       if (sanitizedPoolName.length > 100) {
         throw new Error("Pool Name must be 100 characters or less.");
       }
@@ -430,7 +425,6 @@ function WizardContent({ user, authLoading, mode, location }) {
         throw new Error("Sport name must be 50 characters or less.");
       }
 
-      // Minimal data required by Firestore rules
       const newPoolData = {
         poolName: sanitizedPoolName,
         format: selectedFormat.key,
@@ -439,7 +433,7 @@ function WizardContent({ user, authLoading, mode, location }) {
         createdAt: serverTimestamp(),
         commissionerId: user.uid,
         memberIds: [user.uid],
-        // Optional fields
+        // Additional optional data
         sportKey: selectedSport.key,
         formatName: selectedFormat.name,
         inviteCode,
@@ -464,7 +458,9 @@ function WizardContent({ user, authLoading, mode, location }) {
         await withRetry("Initialize Strips", () =>
           setDoc(doc(db, "pools", docRef.id), { strips }, { merge: true })
         );
-        console.log("CreatePoolWizard - Initialized 10 strips for Strip Cards pool");
+        console.log(
+          "CreatePoolWizard - Initialized 10 strips for Strip Cards pool"
+        );
         if (analytics && !hasLoggedStripsInitialized.current) {
           logEvent(analytics, "strips_initialized", {
             userId: user.uid,
@@ -472,7 +468,9 @@ function WizardContent({ user, authLoading, mode, location }) {
             stripCount: 10,
             timestamp: new Date().toISOString(),
           });
-          console.log("CreatePoolWizard - Strips initialization logged to Firebase Analytics");
+          console.log(
+            "CreatePoolWizard - Strips initialization logged to Firebase Analytics"
+          );
           hasLoggedStripsInitialized.current = true;
         }
       } else if (selectedFormat.key === "squares") {
@@ -483,7 +481,7 @@ function WizardContent({ user, authLoading, mode, location }) {
             squares[squareId] = {
               row,
               col,
-              userId: null, // Not claimed yet
+              userId: null,
               claimedAt: null,
             };
           }
@@ -491,7 +489,9 @@ function WizardContent({ user, authLoading, mode, location }) {
         await withRetry("Initialize Squares", () =>
           setDoc(doc(db, "pools", docRef.id), { squares }, { merge: true })
         );
-        console.log("CreatePoolWizard - Initialized 100 squares for Squares pool");
+        console.log(
+          "CreatePoolWizard - Initialized 100 squares for Squares pool"
+        );
         if (analytics && !hasLoggedSquaresInitialized.current) {
           logEvent(analytics, "squares_initialized", {
             userId: user.uid,
@@ -499,7 +499,9 @@ function WizardContent({ user, authLoading, mode, location }) {
             squareCount: 100,
             timestamp: new Date().toISOString(),
           });
-          console.log("CreatePoolWizard - Squares initialization logged to Firebase Analytics");
+          console.log(
+            "CreatePoolWizard - Squares initialization logged to Firebase Analytics"
+          );
           hasLoggedSquaresInitialized.current = true;
         }
       }
@@ -527,15 +529,19 @@ function WizardContent({ user, authLoading, mode, location }) {
       console.error("CreatePoolWizard - Firestore Error:", err, err.stack);
       let userFriendlyError = "Failed to create pool. Please try again.";
       if (err.code === "permission-denied") {
-        userFriendlyError = "You do not have permission to create a pool. Please contact support.";
+        userFriendlyError =
+          "You do not have permission to create a pool. Please contact support.";
       } else if (err.code === "unavailable") {
-        userFriendlyError = "Firestore is currently unavailable. Please try again later.";
+        userFriendlyError =
+          "Firestore is currently unavailable. Please try again later.";
       } else if (err.code === "invalid-argument") {
-        userFriendlyError = "Invalid data provided. Please check your inputs and try again.";
+        userFriendlyError =
+          "Invalid data provided. Please check your inputs and try again.";
       } else if (err.message) {
         userFriendlyError = err.message;
       }
       setError(userFriendlyError);
+
       if (analytics) {
         logEvent(analytics, "pool_creation_failed", {
           userId: user?.uid || "anonymous",
@@ -548,8 +554,20 @@ function WizardContent({ user, authLoading, mode, location }) {
     } finally {
       setCreating(false);
     }
-  }, [user, selectedSport, selectedFormat, poolName, analytics, db, sanitizeInput, generateUniqueInviteCode, navigate]);
+  }, [
+    user,
+    selectedSport,
+    selectedFormat,
+    poolName,
+    analytics,
+    db,
+    sanitizeInput,
+    generateUniqueInviteCode,
+    navigate,
+    withRetry,
+  ]);
 
+  // Cancel wizard
   const handleCancelWizard = useCallback(() => {
     navigate("/dashboard");
     if (!hasLoggedWizardCanceled.current && analytics) {
@@ -563,6 +581,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     }
   }, [navigate, analytics, user, activeStep]);
 
+  // Share invite link
   const handleShareInvite = useCallback(() => {
     const inviteUrl = `${window.location.origin}/join?code=${inviteCode}`;
     if (navigator.share) {
@@ -636,7 +655,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 4,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif'",
+            fontFamily: "'Montserrat', sans-serif",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -689,14 +708,14 @@ function WizardContent({ user, authLoading, mode, location }) {
                     <Box sx={{ mb: 1 }}>{sport.icon}</Box>
                     <Typography
                       variant="body1"
-                      sx={{ fontWeight: 600, fontFamily: "'Poppins', sans-serif'" }}
+                      sx={{ fontWeight: 600, fontFamily: "'Poppins', sans-serif" }}
                     >
                       {sport.name}
                     </Typography>
                     {sport.comingSoon && (
                       <Typography
                         variant="body2"
-                        sx={{ color: "#FF4040", mt: 0.5, fontFamily: "'Poppins', sans-serif'" }}
+                        sx={{ color: "#FF4040", mt: 0.5, fontFamily: "'Poppins', sans-serif" }}
                       >
                         (Coming Soon)
                       </Typography>
@@ -729,7 +748,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 4,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif'",
+            fontFamily: "'Montserrat', sans-serif",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -782,14 +801,14 @@ function WizardContent({ user, authLoading, mode, location }) {
                         fontWeight: 600,
                         mb: 1,
                         color: "#FFD700",
-                        fontFamily: "'Poppins', sans-serif'",
+                        fontFamily: "'Poppins', sans-serif",
                       }}
                     >
                       {fmt.name}
                     </Typography>
                     <Typography
                       variant="body2"
-                      sx={{ fontFamily: "'Poppins', sans-serif'" }}
+                      sx={{ fontFamily: "'Poppins', sans-serif" }}
                     >
                       {fmt.desc}
                     </Typography>
@@ -828,7 +847,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 4,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif'",
+            fontFamily: "'Montserrat', sans-serif",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -841,8 +860,8 @@ function WizardContent({ user, authLoading, mode, location }) {
           value={poolName}
           onChange={(e) => setPoolName(e.target.value)}
           sx={{ mb: 3 }}
-          InputLabelProps={{ sx: { fontFamily: "'Poppins', sans-serif'" } }}
-          InputProps={{ sx: { fontFamily: "'Poppins', sans-serif'" } }}
+          InputLabelProps={{ sx: { fontFamily: "'Poppins', sans-serif" } }}
+          InputProps={{ sx: { fontFamily: "'Poppins', sans-serif" } }}
           inputProps={{ "aria-label": "Enter pool name" }}
           required
         />
@@ -862,10 +881,7 @@ function WizardContent({ user, authLoading, mode, location }) {
             >
               Cancel
             </StyledButton>
-            <StyledButton
-              onClick={handleNextStepValidation}
-              aria-label="Go to review and create step"
-            >
+            <StyledButton onClick={handleNextStepValidation} aria-label="Go to review and create step">
               Next
             </StyledButton>
           </Box>
@@ -883,7 +899,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 4,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif'",
+            fontFamily: "'Montserrat', sans-serif",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -901,7 +917,7 @@ function WizardContent({ user, authLoading, mode, location }) {
             variant="body1"
             sx={{
               mb: 1,
-              fontFamily: "'Poppins', sans-serif'",
+              fontFamily: "'Poppins', sans-serif",
               color: isDarkMode ? "#B0BEC5" : "#555555",
             }}
           >
@@ -911,7 +927,7 @@ function WizardContent({ user, authLoading, mode, location }) {
             variant="body1"
             sx={{
               mb: 1,
-              fontFamily: "'Poppins', sans-serif'",
+              fontFamily: "'Poppins', sans-serif",
               color: isDarkMode ? "#B0BEC5" : "#555555",
             }}
           >
@@ -921,7 +937,7 @@ function WizardContent({ user, authLoading, mode, location }) {
             variant="body1"
             sx={{
               mb: 1,
-              fontFamily: "'Poppins', sans-serif'",
+              fontFamily: "'Poppins', sans-serif",
               color: isDarkMode ? "#B0BEC5" : "#555555",
             }}
           >
@@ -947,14 +963,11 @@ function WizardContent({ user, authLoading, mode, location }) {
             >
               Cancel
             </StyledButton>
-            <StyledButton
-              onClick={handleCreatePool}
-              disabled={creating}
-              aria-label="Create pool"
-            >
+            <StyledButton onClick={handleCreatePool} disabled={creating} aria-label="Create pool">
               {creating ? (
                 <>
-                  Creating... <CircularProgress size={20} sx={{ ml: 1 }} aria-label="Creating pool" />
+                  Creating...{" "}
+                  <CircularProgress size={20} sx={{ ml: 1 }} aria-label="Creating pool" />
                 </>
               ) : (
                 "Create Pool"
@@ -975,7 +988,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 2,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif'",
+            fontFamily: "'Montserrat', sans-serif",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -985,7 +998,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           variant="body1"
           sx={{
             mb: 4,
-            fontFamily: "'Poppins', sans-serif'",
+            fontFamily: "'Poppins', sans-serif",
             color: isDarkMode ? "#B0BEC5" : "#555555",
           }}
         >
@@ -997,7 +1010,7 @@ function WizardContent({ user, authLoading, mode, location }) {
               variant="body1"
               sx={{
                 mb: 2,
-                fontFamily: "'Poppins', sans-serif'",
+                fontFamily: "'Poppins', sans-serif",
                 color: isDarkMode ? "#B0BEC5" : "#555555",
               }}
             >
@@ -1008,7 +1021,7 @@ function WizardContent({ user, authLoading, mode, location }) {
               value={inviteUrl}
               InputProps={{
                 readOnly: true,
-                sx: { fontFamily: "'Poppins', sans-serif'" },
+                sx: { fontFamily: "'Poppins', sans-serif" },
               }}
               sx={{ mb: 2 }}
               variant="outlined"
@@ -1058,7 +1071,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                 sx={{
                   mb: 2,
                   fontWeight: 700,
-                  fontFamily: "'Montserrat', sans-serif'",
+                  fontFamily: "'Montserrat', sans-serif",
                   color: isDarkMode ? "#FFFFFF" : "#0B162A",
                 }}
               >
@@ -1068,7 +1081,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                 variant="body1"
                 sx={{
                   mb: 3,
-                  fontFamily: "'Poppins', sans-serif'",
+                  fontFamily: "'Poppins', sans-serif",
                   color: isDarkMode ? "#B0BEC5" : "#555555",
                 }}
               >
@@ -1081,7 +1094,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     );
   }
 
-  // Render the wizard if user is authenticated
+  // Render wizard if user is authenticated
   return (
     <WizardContainer>
       <Container maxWidth="md">
@@ -1092,7 +1105,7 @@ function WizardContent({ user, authLoading, mode, location }) {
               sx={{
                 mb: 4,
                 fontWeight: 700,
-                fontFamily: "'Montserrat', sans-serif'",
+                fontFamily: "'Montserrat', sans-serif",
                 color: isDarkMode ? "#FFFFFF" : "#0B162A",
                 textAlign: "center",
               }}
@@ -1119,7 +1132,12 @@ function WizardContent({ user, authLoading, mode, location }) {
               onClose={() => setSuccessMessage("")}
               anchorOrigin={{ vertical: "top", horizontal: "center" }}
             >
-              <Alert severity="success" sx={{ fontFamily: "'Poppins', sans-serif'" }} role="alert" aria-live="assertive">
+              <Alert
+                severity="success"
+                sx={{ fontFamily: "'Poppins', sans-serif" }}
+                role="alert"
+                aria-live="assertive"
+              >
                 {successMessage}
               </Alert>
             </Snackbar>
@@ -1142,7 +1160,6 @@ function WizardContent({ user, authLoading, mode, location }) {
   );
 }
 
-// Main component to wrap the wizard content
 export default function CreatePoolWizard() {
   const { user, authLoading } = useAuth();
   const { mode } = useThemeContext();

@@ -35,36 +35,40 @@
       }
     ],
     "headers": [
-  {
-    "source": "**",
-    "headers": [
       {
-        "key": "Content-Security-Policy",
-        "value": "default-src 'self'; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.googletagmanager.com https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.firebaseio.com wss://*.firebaseio.com https://*.googleapis.com https://www.google-analytics.com; object-src 'none';"
-      },
-      {
-        "key": "Cross-Origin-Opener-Policy",
-        "value": "same-origin"
-      },
-      {
-        "key": "Cross-Origin-Embedder-Policy",
-        "value": "unsafe-none"
-      },
-      {
-        "key": "X-Content-Type-Options",
-        "value": "nosniff"
-      },
-      {
-        "key": "X-Frame-Options",
-        "value": "DENY"
-      },
-      {
-        "key": "Referrer-Policy",
-        "value": "strict-origin-when-cross-origin"
-      },
-      {
-        "key": "Permissions-Policy",
-        "value": "geolocation=(), microphone=(), camera=()"
+        "source": "**",
+        "headers": [
+          {
+            "key": "Content-Security-Policy",
+            "value": "default-src 'self'; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com; script-src 'self' https://www.gstatic.com https://*.gstatic.com https://www.googletagmanager.com https://apis.google.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://picsum.photos; connect-src 'self' https://*.firebaseio.com wss://*.firebaseio.com https://*.googleapis.com https://www.google-analytics.com https://apis.google.com https://accounts.google.com https://us-central1-bonomosportspools.cloudfunctions.net https://www.google.com; object-src 'none';"
+          },
+          {
+            "key": "Cross-Origin-Opener-Policy",
+            "value": "same-origin"
+          },
+          {
+            "key": "Cross-Origin-Embedder-Policy",
+            "value": "unsafe-none"
+          },
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "X-Frame-Options",
+            "value": "DENY"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "strict-origin-when-cross-origin"
+          },
+          {
+            "key": "Permissions-Policy",
+            "value": "geolocation=(), microphone=(), camera=()"
+          },
+          {
+            "key": "RateLimit",
+            "value": "max=1000;windowMs=900000"
           }
         ]
       }

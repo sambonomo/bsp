@@ -10,9 +10,7 @@ import {
   query,
   where,
   getDocs,
-  getDoc,
   onSnapshot,
-  doc,
 } from "firebase/firestore";
 import {
   Box,
@@ -24,12 +22,8 @@ import {
   Fade,
   styled,
   TextField,
-  IconButton,
-  Card,
-  CardContent,
-  CardActions,
-  CircularProgress,
   Alert,
+  CircularProgress,
 } from "@mui/material";
 import SportsFootballIcon from "@mui/icons-material/SportsFootball";
 import SportsBaseballIcon from "@mui/icons-material/SportsBaseball";
@@ -56,7 +50,8 @@ const HeroBox = styled(Box)(({ theme }) => ({
     left: 0,
     right: 0,
     bottom: 0,
-    background: "radial-gradient(circle, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 70%)",
+    background:
+      "radial-gradient(circle, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 70%)",
     opacity: 0.4,
   },
 }));
@@ -65,7 +60,12 @@ const StepBadge = styled(Box)(({ theme, tier }) => ({
   width: 60,
   height: 60,
   borderRadius: "50%",
-  backgroundColor: tier === "Bronze" ? "#CD7F32" : tier === "Silver" ? "#C0C0C0" : "#FFD700",
+  backgroundColor:
+    tier === "Bronze"
+      ? "#CD7F32"
+      : tier === "Silver"
+      ? "#C0C0C0"
+      : "#FFD700",
   color: "#0B162A",
   display: "flex",
   alignItems: "center",
@@ -136,18 +136,25 @@ function LandingPage() {
   const isDarkMode = mode === "dark";
   const navigate = useNavigate();
   const [showStickyButton, setShowStickyButton] = useState(false);
+
+  // Newsletter signup
   const [email, setEmail] = useState("");
   const [emailError, setEmailError] = useState("");
   const [emailSubmitting, setEmailSubmitting] = useState(false);
   const [emailSuccess, setEmailSuccess] = useState("");
+
+  // Featured Pools
   const [featuredPools, setFeaturedPools] = useState([]);
-  const [stats, setStats] = useState({
-    poolsCreated: "0+",
-    usersJoined: "0+",
-    gamesPlayed: "0+",
-  });
+
+  // Hard-coded stats (instead of dynamic Firestore stats)
+  const stats = {
+    poolsCreated: "250+",
+    usersJoined: "500+",
+    gamesPlayed: "2,500+",
+  };
+
+  // Analytics
   const [analytics, setAnalytics] = useState(null);
-  const howItWorksRef = useRef(null);
   const hasLoggedPageView = useRef(false);
   const hasLoggedLearnMore = useRef(false);
   const hasLoggedSportCardClick = useRef({});
@@ -158,7 +165,10 @@ function LandingPage() {
   const hasLoggedStickyGetStartedClick = useRef(false);
   const hasLoggedNewsletterSignup = useRef(false);
   const hasLoggedNewsletterCancel = useRef(false);
+
+  // Refs
   const db = getDb();
+  const howItWorksRef = useRef(null);
 
   // Initialize analytics
   useEffect(() => {
@@ -182,58 +192,21 @@ function LandingPage() {
   useEffect(() => {
     const poolsRef = collection(db, "pools");
     const q = query(poolsRef, where("isFeatured", "==", true));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const poolsData = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setFeaturedPools(poolsData);
-    }, (err) => {
-      console.error("Failed to fetch featured pools:", err);
-      setFeaturedPools([]); // Fallback to empty array on error
-    });
-    return () => unsubscribe();
-  }, [db]);
-
-  // Fetch real-time community stats from /stats/community
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const statsRef = doc(db, "stats", "community");
-        const statsDoc = await getDoc(statsRef);
-        if (statsDoc.exists()) {
-          const data = statsDoc.data();
-          // Format numbers
-          const formatNumber = (num) => {
-            if (typeof num !== "number") return "0+";
-            if (num >= 1000) return `${Math.floor(num / 1000)},${num % 1000}+`;
-            return `${num}+`;
-          };
-
-          setStats({
-            poolsCreated: formatNumber(data.poolsCreated || 0),
-            usersJoined: formatNumber(data.usersJoined || 0),
-            gamesPlayed: formatNumber(data.gamesPlayed || 0),
-          });
-        } else {
-          console.error("Community stats document not found");
-          setStats({
-            poolsCreated: "0+",
-            usersJoined: "0+",
-            gamesPlayed: "0+",
-          });
-        }
-      } catch (err) {
-        console.error("Failed to fetch community stats:", err);
-        setStats({
-          poolsCreated: "0+",
-          usersJoined: "0+",
-          gamesPlayed: "0+",
-        });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const poolsData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setFeaturedPools(poolsData);
+      },
+      (err) => {
+        console.error("Failed to fetch featured pools:", err);
+        setFeaturedPools([]); // Fallback to empty array on error
       }
-    };
-
-    fetchStats();
+    );
+    return () => unsubscribe();
   }, [db]);
 
   // Handle sticky button visibility on scroll
@@ -467,7 +440,14 @@ function LandingPage() {
             >
               Create Your Free Pool in Seconds! Pick’em, Survivor, Squares, Strip Cards, and More.
             </Typography>
-            <Box sx={{ display: "flex", justifyContent: "center", gap: 3, flexWrap: "wrap" }}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "center",
+                gap: 3,
+                flexWrap: "wrap",
+              }}
+            >
               <Button
                 component={RouterLink}
                 to="/create-pool"
@@ -481,7 +461,10 @@ function LandingPage() {
                   py: 1.5,
                   borderRadius: 2,
                   boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                  "&:hover": { backgroundColor: isDarkMode ? "#FFEB3B" : "#E0B030", boxShadow: "0 6px 16px rgba(0,0,0,0.3)" },
+                  "&:hover": {
+                    backgroundColor: isDarkMode ? "#FFEB3B" : "#E0B030",
+                    boxShadow: "0 6px 16px rgba(0,0,0,0.3)",
+                  },
                 }}
                 aria-label="Create a pool"
                 onClick={handleCreatePoolClick}
@@ -501,7 +484,10 @@ function LandingPage() {
                   py: 1.5,
                   borderRadius: 2,
                   boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                  "&:hover": { backgroundColor: isDarkMode ? "#FFEB3B" : "#E0B030", boxShadow: "0 6px 16px rgba(0,0,0,0.3)" },
+                  "&:hover": {
+                    backgroundColor: isDarkMode ? "#FFEB3B" : "#E0B030",
+                    boxShadow: "0 6px 16px rgba(0,0,0,0.3)",
+                  },
                 }}
                 aria-label="Join a pool"
                 onClick={handleJoinPoolClick}
@@ -520,7 +506,9 @@ function LandingPage() {
                   py: 1.5,
                   borderRadius: 2,
                   "&:hover": {
-                    backgroundColor: isDarkMode ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)",
+                    backgroundColor: isDarkMode
+                      ? "rgba(255,255,255,0.1)"
+                      : "rgba(0,0,0,0.1)",
                   },
                 }}
                 endIcon={<ArrowDownwardIcon aria-hidden="true" />}
@@ -536,7 +524,14 @@ function LandingPage() {
       {/* =============================
           HOW IT WORKS
       ============================= */}
-      <Box sx={{ py: { xs: 10, md: 12 }, px: { xs: 2, md: 6 }, backgroundColor: isDarkMode ? "#2A3B5A" : "#E0E0E0" }} ref={howItWorksRef}>
+      <Box
+        sx={{
+          py: { xs: 10, md: 12 },
+          px: { xs: 2, md: 6 },
+          backgroundColor: isDarkMode ? "#2A3B5A" : "#E0E0E0",
+        }}
+        ref={howItWorksRef}
+      >
         <SectionContainer maxWidth="lg">
           <Typography
             variant="h3"
@@ -558,24 +553,49 @@ function LandingPage() {
                 step: 1,
                 title: "Sign Up",
                 desc: "Join with a free Bronze account to get started.",
-                icon: <PersonAddIcon sx={{ fontSize: 50, color: "#CD7F32" }} aria-label="Sign up icon" />,
+                icon: (
+                  <PersonAddIcon
+                    sx={{ fontSize: 50, color: "#CD7F32" }}
+                    aria-label="Sign up icon"
+                  />
+                ),
               },
               {
                 tier: "Silver",
                 step: 2,
                 title: "Create or Join",
                 desc: "Create a pool or join one with a code—Pick’em, Survivor, Squares, or Strip Cards.",
-                icon: <GroupAddIcon sx={{ fontSize: 50, color: "#C0C0C0" }} aria-label="Create or join icon" />,
+                icon: (
+                  <GroupAddIcon
+                    sx={{ fontSize: 50, color: "#C0C0C0" }}
+                    aria-label="Create or join icon"
+                  />
+                ),
               },
               {
                 tier: "Gold",
                 step: 3,
                 title: "Compete & Win",
                 desc: "Track results and aim for the Gold—bragging rights await!",
-                icon: <EmojiEventsIcon sx={{ fontSize: 50, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="Compete and win icon" />,
+                icon: (
+                  <EmojiEventsIcon
+                    sx={{
+                      fontSize: 50,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="Compete and win icon"
+                  />
+                ),
               },
             ].map((item) => (
-              <Grid item xs={12} sm={4} md={4} key={item.step} sx={{ display: "flex", justifyContent: "center" }}>
+              <Grid
+                item
+                xs={12}
+                sm={4}
+                md={4}
+                key={item.step}
+                sx={{ display: "flex", justifyContent: "center" }}
+              >
                 <Fade in timeout={1200 + item.step * 200}>
                   <Paper
                     sx={{
@@ -583,7 +603,10 @@ function LandingPage() {
                       textAlign: "center",
                       backgroundColor: isDarkMode ? "#1A2A44" : "#FFFFFF",
                       transition: "transform 0.3s ease",
-                      "&:hover": { transform: "scale(1.03)", boxShadow: "0 6px 20px rgba(0,0,0,0.15)" },
+                      "&:hover": {
+                        transform: "scale(1.03)",
+                        boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
+                      },
                       borderRadius: 3,
                       border: "1px solid",
                       borderColor: isDarkMode ? "#3A4B6A" : "#E0E0E0",
@@ -596,12 +619,19 @@ function LandingPage() {
                   >
                     <StepBadge tier={item.tier}>{item.step}</StepBadge>
                     {item.icon}
-                    <Typography variant="h6" sx={{ fontWeight: 600, mb: 1, mt: 2, fontSize: "1.3rem" }}>
+                    <Typography
+                      variant="h6"
+                      sx={{ fontWeight: 600, mb: 1, mt: 2, fontSize: "1.3rem" }}
+                    >
                       {item.title}
                     </Typography>
                     <Typography
                       variant="body2"
-                      sx={{ color: isDarkMode ? "#B0BEC5" : "#555555", lineHeight: 1.6, fontFamily: "'Poppins', sans-serif'" }}
+                      sx={{
+                        color: isDarkMode ? "#B0BEC5" : "#555555",
+                        lineHeight: 1.6,
+                        fontFamily: "'Poppins', sans-serif'",
+                      }}
                     >
                       {item.desc}
                     </Typography>
@@ -616,7 +646,13 @@ function LandingPage() {
       {/* =============================
           WHY CHOOSE BSP?
       ============================= */}
-      <Box sx={{ py: { xs: 10, md: 12 }, px: { xs: 2, md: 6 }, backgroundColor: isDarkMode ? "#1A2A44" : "#F5F5F5" }}>
+      <Box
+        sx={{
+          py: { xs: 10, md: 12 },
+          px: { xs: 2, md: 6 },
+          backgroundColor: isDarkMode ? "#1A2A44" : "#F5F5F5",
+        }}
+      >
         <SectionContainer maxWidth="lg">
           <Typography
             variant="h3"
@@ -634,17 +670,41 @@ function LandingPage() {
           <Grid container spacing={4} justifyContent="center">
             {[
               {
-                icon: <SportsFootballIcon sx={{ fontSize: 50, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="Variety of pool types icon" />,
+                icon: (
+                  <SportsFootballIcon
+                    sx={{
+                      fontSize: 50,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="Variety of pool types icon"
+                  />
+                ),
                 title: "Variety of Pool Types",
                 desc: "Choose from Pick’em, Survivor, Squares, or Strip Cards for any sport.",
               },
               {
-                icon: <GroupAddIcon sx={{ fontSize: 50, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="All sports supported icon" />,
+                icon: (
+                  <GroupAddIcon
+                    sx={{
+                      fontSize: 50,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="All sports supported icon"
+                  />
+                ),
                 title: "All Sports Supported",
                 desc: "From NFL to NASCAR, create pools for your favorite events.",
               },
               {
-                icon: <EmojiEventsIcon sx={{ fontSize: 50, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="Free and fun icon" />,
+                icon: (
+                  <EmojiEventsIcon
+                    sx={{
+                      fontSize: 50,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="Free and fun icon"
+                  />
+                ),
                 title: "Free & Fun",
                 desc: "No fees, just friendly competition. Perfect for friends, family, or the office.",
               },
@@ -660,7 +720,11 @@ function LandingPage() {
                       "&:hover": {
                         transform: "scale(1.03)",
                         border: "2px solid",
-                        borderImage: `linear-gradient(45deg, ${isDarkMode ? "#FFD700" : "#D4A017"}, ${isDarkMode ? "#FFEB3B" : "#E0B030"}) 1`,
+                        borderImage: `linear-gradient(45deg, ${
+                          isDarkMode ? "#FFD700" : "#D4A017"
+                        }, ${
+                          isDarkMode ? "#FFEB3B" : "#E0B030"
+                        }) 1`,
                         boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
                       },
                       borderRadius: 3,
@@ -672,12 +736,25 @@ function LandingPage() {
                     aria-label={item.title}
                   >
                     {item.icon}
-                    <Typography variant="h6" sx={{ fontWeight: 600, mb: 1, mt: 2, fontSize: "1.3rem", fontFamily: "'Montserrat', sans-serif'" }}>
+                    <Typography
+                      variant="h6"
+                      sx={{
+                        fontWeight: 600,
+                        mb: 1,
+                        mt: 2,
+                        fontSize: "1.3rem",
+                        fontFamily: "'Montserrat', sans-serif'",
+                      }}
+                    >
                       {item.title}
                     </Typography>
                     <Typography
                       variant="body2"
-                      sx={{ color: isDarkMode ? "#B0BEC5" : "#555555", lineHeight: 1.6, fontFamily: "'Poppins', sans-serif'" }}
+                      sx={{
+                        color: isDarkMode ? "#B0BEC5" : "#555555",
+                        lineHeight: 1.6,
+                        fontFamily: "'Poppins', sans-serif'",
+                      }}
                     >
                       {item.desc}
                     </Typography>
@@ -692,7 +769,13 @@ function LandingPage() {
       {/* =============================
           POOLS FOR EVERY SPORT
       ============================= */}
-      <Box sx={{ py: { xs: 10, md: 12 }, px: { xs: 2, md: 6 }, backgroundColor: isDarkMode ? "#2A3B5A" : "#E0E0E0" }}>
+      <Box
+        sx={{
+          py: { xs: 10, md: 12 },
+          px: { xs: 2, md: 6 },
+          backgroundColor: isDarkMode ? "#2A3B5A" : "#E0E0E0",
+        }}
+      >
         <SectionContainer maxWidth="lg">
           <Typography
             variant="h3"
@@ -709,12 +792,84 @@ function LandingPage() {
           </Typography>
           <Grid container spacing={3} justifyContent="center">
             {[
-              { name: "NFL Football", sportKey: "nfl", icon: <SportsFootballIcon sx={{ fontSize: 40, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="NFL Football icon" /> },
-              { name: "NBA Basketball", sportKey: "nba", icon: <SportsBasketballIcon sx={{ fontSize: 40, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="NBA Basketball icon" /> },
-              { name: "NHL Hockey", sportKey: "nhl", icon: <SportsHockeyIcon sx={{ fontSize: 40, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="NHL Hockey icon" /> },
-              { name: "MLB Baseball", sportKey: "mlb", icon: <SportsBaseballIcon sx={{ fontSize: 40, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="MLB Baseball icon" /> },
-              { name: "PGA Golf", sportKey: "pga", icon: <SportsGolfIcon sx={{ fontSize: 40, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="PGA Golf icon" /> },
-              { name: "NASCAR", sportKey: "nascar", icon: <DirectionsCarIcon sx={{ fontSize: 40, color: isDarkMode ? "#FFD700" : "#D4A017" }} aria-label="NASCAR icon" /> },
+              {
+                name: "NFL Football",
+                sportKey: "nfl",
+                icon: (
+                  <SportsFootballIcon
+                    sx={{
+                      fontSize: 40,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="NFL Football icon"
+                  />
+                ),
+              },
+              {
+                name: "NBA Basketball",
+                sportKey: "nba",
+                icon: (
+                  <SportsBasketballIcon
+                    sx={{
+                      fontSize: 40,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="NBA Basketball icon"
+                  />
+                ),
+              },
+              {
+                name: "NHL Hockey",
+                sportKey: "nhl",
+                icon: (
+                  <SportsHockeyIcon
+                    sx={{
+                      fontSize: 40,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="NHL Hockey icon"
+                  />
+                ),
+              },
+              {
+                name: "MLB Baseball",
+                sportKey: "mlb",
+                icon: (
+                  <SportsBaseballIcon
+                    sx={{
+                      fontSize: 40,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="MLB Baseball icon"
+                  />
+                ),
+              },
+              {
+                name: "PGA Golf",
+                sportKey: "pga",
+                icon: (
+                  <SportsGolfIcon
+                    sx={{
+                      fontSize: 40,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="PGA Golf icon"
+                  />
+                ),
+              },
+              {
+                name: "NASCAR",
+                sportKey: "nascar",
+                icon: (
+                  <DirectionsCarIcon
+                    sx={{
+                      fontSize: 40,
+                      color: isDarkMode ? "#FFD700" : "#D4A017",
+                    }}
+                    aria-label="NASCAR icon"
+                  />
+                ),
+              },
             ].map((sport, index) => (
               <Grid item xs={6} sm={4} md={2} key={sport.name}>
                 <Fade in timeout={1000 + index * 300}>
@@ -737,7 +892,9 @@ function LandingPage() {
                         width: 60,
                         height: 60,
                         borderRadius: "50%",
-                        backgroundColor: isDarkMode ? "#3A4B6A" : "#F0F0F0",
+                        backgroundColor: isDarkMode
+                          ? "#3A4B6A"
+                          : "#F0F0F0",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -769,7 +926,13 @@ function LandingPage() {
       {/* =============================
           TESTIMONIALS
       ============================= */}
-      <Box sx={{ py: { xs: 10, md: 12 }, px: { xs: 2, md: 6 }, backgroundColor: isDarkMode ? "#2A3B5A" : "#E0E0E0" }}>
+      <Box
+        sx={{
+          py: { xs: 10, md: 12 },
+          px: { xs: 2, md: 6 },
+          backgroundColor: isDarkMode ? "#2A3B5A" : "#E0E0E0",
+        }}
+      >
         <SectionContainer maxWidth="lg">
           <Typography
             variant="h3"
@@ -786,15 +949,41 @@ function LandingPage() {
           </Typography>
           <Grid container spacing={4}>
             {[
-              { quote: "BSP’s Pick’em pools are so easy to set up! Our office loves competing each week.", author: "Mike T., Chicago, IL" },
-              { quote: "I ran a Survivor pool for the NFL season, and BSP made it seamless. No fees, just fun!", author: "Sarah L., New York, NY" },
-              { quote: "The mobile experience for Squares pools is amazing. I joined on my phone in seconds.", author: "Jake R., Los Angeles, CA" },
-              { quote: "Strip Cards for NASCAR were a hit! The automatic assignment of drivers was perfect.", author: "Emily K., Daytona, FL" },
+              {
+                quote:
+                  "BSP’s Pick’em pools are so easy to set up! Our office loves competing each week.",
+                author: "Mike T., Chicago, IL",
+              },
+              {
+                quote:
+                  "I ran a Survivor pool for the NFL season, and BSP made it seamless. No fees, just fun!",
+                author: "Sarah L., New York, NY",
+              },
+              {
+                quote:
+                  "The mobile experience for Squares pools is amazing. I joined on my phone in seconds.",
+                author: "Jake R., Los Angeles, CA",
+              },
+              {
+                quote:
+                  "Strip Cards for NASCAR were a hit! The automatic assignment of drivers was perfect.",
+                author: "Emily K., Daytona, FL",
+              },
             ].map((item, index) => (
               <Grid item xs={12} sm={6} md={3} key={index}>
                 <Fade in timeout={1200 + index * 200}>
                   <TestimonialCard>
-                    <FormatQuoteIcon sx={{ position: "absolute", top: 16, left: 16, fontSize: 40, color: isDarkMode ? "#B0BEC5" : "#555555", opacity: 0.2 }} aria-hidden="true" />
+                    <FormatQuoteIcon
+                      sx={{
+                        position: "absolute",
+                        top: 16,
+                        left: 16,
+                        fontSize: 40,
+                        color: isDarkMode ? "#B0BEC5" : "#555555",
+                        opacity: 0.2,
+                      }}
+                      aria-hidden="true"
+                    />
                     <Typography
                       variant="body1"
                       sx={{
@@ -808,7 +997,13 @@ function LandingPage() {
                     >
                       {item.quote}
                     </Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: "'Poppins', sans-serif'" }}>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontWeight: 600,
+                        fontFamily: "'Poppins', sans-serif'",
+                      }}
+                    >
                       — {item.author}
                     </Typography>
                   </TestimonialCard>
@@ -820,9 +1015,15 @@ function LandingPage() {
       </Box>
 
       {/* =============================
-          STATS SECTION
+          STATS SECTION (Now Hardcoded)
       ============================= */}
-      <Box sx={{ py: { xs: 10, md: 12 }, px: { xs: 2, md: 6 }, backgroundColor: isDarkMode ? "#1A2A44" : "#F5F5F5" }}>
+      <Box
+        sx={{
+          py: { xs: 10, md: 12 },
+          px: { xs: 2, md: 6 },
+          backgroundColor: isDarkMode ? "#1A2A44" : "#F5F5F5",
+        }}
+      >
         <SectionContainer maxWidth="lg">
           <Typography
             variant="h3"
@@ -877,7 +1078,13 @@ function LandingPage() {
       {/* =============================
           FAQ SECTION
       ============================= */}
-      <Box sx={{ py: { xs: 10, md: 12 }, px: { xs: 2, md: 6 }, backgroundColor: isDarkMode ? "#2A3B5A" : "#E0E0E0" }}>
+      <Box
+        sx={{
+          py: { xs: 10, md: 12 },
+          px: { xs: 2, md: 6 },
+          backgroundColor: isDarkMode ? "#2A3B5A" : "#E0E0E0",
+        }}
+      >
         <SectionContainer maxWidth="lg">
           <Typography
             variant="h3"
@@ -896,15 +1103,18 @@ function LandingPage() {
             {[
               {
                 question: "What types of pools can I create?",
-                answer: "BSP supports Pick’em, Survivor, Squares, and Strip Cards. Choose the format that best suits your event, from NFL games to PGA tournaments.",
+                answer:
+                  "BSP supports Pick’em, Survivor, Squares, and Strip Cards. Choose the format that best suits your event, from NFL games to PGA tournaments.",
               },
               {
                 question: "Is Bonomo Sports Pools free to use?",
-                answer: "Yes! Our Bronze tier is free with ads. Upgrade to Silver or Gold for an ad-free experience and premium features.",
+                answer:
+                  "Yes! Our Bronze tier is free with ads. Upgrade to Silver or Gold for an ad-free experience and premium features.",
               },
               {
                 question: "How do I invite friends to my pool?",
-                answer: "After creating a pool, you'll get an invite code and a shareable link to send to your friends or family. They can join using the code!",
+                answer:
+                  "After creating a pool, you'll get an invite code and a shareable link to send to your friends or family. They can join using the code!",
               },
             ].map((faq, index) => (
               <Grid item xs={12} key={index}>
@@ -979,7 +1189,8 @@ function LandingPage() {
               fontFamily: "'Poppins', sans-serif'",
             }}
           >
-            Create a pool for your favorite sport—Pick’em, Survivor, Squares, or Strip Cards. It’s free, fun, and takes just seconds!
+            Create a pool for your favorite sport—Pick’em, Survivor, Squares, or
+            Strip Cards. It’s free, fun, and takes just seconds!
           </Typography>
           <Box sx={{ textAlign: "center" }}>
             <Button
@@ -995,7 +1206,10 @@ function LandingPage() {
                 py: 2,
                 borderRadius: 2,
                 boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
-                "&:hover": { backgroundColor: isDarkMode ? "#FFEB3B" : "#E0B030", boxShadow: "0 8px 24px rgba(0,0,0,0.4)" },
+                "&:hover": {
+                  backgroundColor: isDarkMode ? "#FFEB3B" : "#E0B030",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                },
               }}
               aria-label="Get started now with a pool"
               onClick={handleGetStartedClick}
@@ -1009,7 +1223,13 @@ function LandingPage() {
       {/* =============================
           NEWSLETTER SIGNUP
       ============================= */}
-      <Box sx={{ py: { xs: 10, md: 12 }, px: { xs: 2, md: 6 }, backgroundColor: isDarkMode ? "#1A2A44" : "#F5F5F5" }}>
+      <Box
+        sx={{
+          py: { xs: 10, md: 12 },
+          px: { xs: 2, md: 6 },
+          backgroundColor: isDarkMode ? "#1A2A44" : "#F5F5F5",
+        }}
+      >
         <SectionContainer maxWidth="md">
           <Typography
             variant="h3"
@@ -1038,16 +1258,37 @@ function LandingPage() {
               fontFamily: "'Poppins', sans-serif'",
             }}
           >
-            Sign up for our newsletter to get updates on new pools, sports events, and exclusive features.
+            Sign up for our newsletter to get updates on new pools, sports
+            events, and exclusive features.
           </Typography>
-          <Box component="form" onSubmit={handleNewsletterSignup} sx={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 400, mx: "auto" }}>
+          <Box
+            component="form"
+            onSubmit={handleNewsletterSignup}
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              maxWidth: 400,
+              mx: "auto",
+            }}
+          >
             {emailError && (
-              <Alert severity="error" sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }} role="alert" aria-live="assertive">
+              <Alert
+                severity="error"
+                sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }}
+                role="alert"
+                aria-live="assertive"
+              >
                 {emailError}
               </Alert>
             )}
             {emailSuccess && (
-              <Alert severity="success" sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }} role="alert" aria-live="assertive">
+              <Alert
+                severity="success"
+                sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }}
+                role="alert"
+                aria-live="assertive"
+              >
                 {emailSuccess}
               </Alert>
             )}
@@ -1059,8 +1300,13 @@ function LandingPage() {
               required
               fullWidth
               InputProps={{ sx: { fontFamily: "'Poppins', sans-serif'" } }}
-              InputLabelProps={{ sx: { fontFamily: "'Poppins', sans-serif'", id: "newsletter-email-label" } }}
-              inputProps={{ "aria-label": "Enter your email address for newsletter", "aria-describedby": "newsletter-email-label" }}
+              InputLabelProps={{
+                sx: { fontFamily: "'Poppins', sans-serif'", id: "newsletter-email-label" },
+              }}
+              inputProps={{
+                "aria-label": "Enter your email address for newsletter",
+                "aria-describedby": "newsletter-email-label",
+              }}
               disabled={emailSubmitting}
             />
             <Box sx={{ display: "flex", gap: 2, justifyContent: "center" }}>
@@ -1075,12 +1321,18 @@ function LandingPage() {
                   px: 4,
                   py: 1.5,
                   borderRadius: 2,
-                  "&:hover": { backgroundColor: isDarkMode ? "#FFEB3B" : "#E0B030" },
+                  "&:hover": {
+                    backgroundColor: isDarkMode ? "#FFEB3B" : "#E0B030",
+                  },
                 }}
                 disabled={emailSubmitting}
                 aria-label="Sign up for newsletter"
               >
-                {emailSubmitting ? <CircularProgress size={24} aria-label="Submitting" /> : "Sign Up"}
+                {emailSubmitting ? (
+                  <CircularProgress size={24} aria-label="Submitting" />
+                ) : (
+                  "Sign Up"
+                )}
               </Button>
               <Button
                 variant="outlined"
@@ -1094,7 +1346,9 @@ function LandingPage() {
                   py: 1.5,
                   borderRadius: 2,
                   "&:hover": {
-                    backgroundColor: isDarkMode ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)",
+                    backgroundColor: isDarkMode
+                      ? "rgba(255,255,255,0.1)"
+                      : "rgba(0,0,0,0.1)",
                   },
                 }}
                 disabled={emailSubmitting}

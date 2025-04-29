@@ -2,8 +2,16 @@ import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate, useLocation, Link as RouterLink } from "react-router-dom";
 import { doc, setDoc } from "firebase/firestore";
-import { getDb, getAnalyticsService, getAuthService } from "../firebase/config"; // Updated imports
-import { setPersistence, browserLocalPersistence, browserSessionPersistence } from "firebase/auth";
+import {
+  getDb,
+  getAnalyticsService,
+  getAuthService,
+} from "../firebase/config"; // Updated imports
+import {
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+} from "firebase/auth";
 import { logEvent } from "firebase/analytics";
 import {
   Container,
@@ -42,16 +50,20 @@ function SignupPage() {
   const { signup, loginWithGoogle, currentUser, authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const db = getDb(); // Initialize db with accessor
-  const auth = getAuthService(); // Initialize auth with accessor
+
+  // Initialize services
+  const db = getDb();
+  const auth = getAuthService();
+
+  // Tracking refs
   const hasLoggedPageView = useRef(false);
   const hasLoggedEmailSignupSuccess = useRef(false);
   const hasLoggedGoogleSignupSuccess = useRef(false);
   const hasLoggedGoogleSignupClick = useRef(false);
   const hasLoggedTermsAccepted = useRef(false);
-  const hasLoggedRememberMe = useRef(false); // Track if remember_me_toggled has been logged
-  const hasLoggedRetryPerOperation = useRef({}); // Track retry logging per operation
-  const redirectTimeoutRef = useRef(null); // Track redirect timeout
+  const hasLoggedRememberMe = useRef(false);
+  const hasLoggedRetryPerOperation = useRef({});
+  const redirectTimeoutRef = useRef(null);
 
   // Initialize analytics
   useEffect(() => {
@@ -69,7 +81,7 @@ function SignupPage() {
       console.log("SignupPage - Page view logged to Firebase Analytics");
       hasLoggedPageView.current = true;
     }
-  }, [currentUser?.uid, analytics]); // Added analytics to dependencies
+  }, [currentUser?.uid, analytics]);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -101,11 +113,14 @@ function SignupPage() {
   }, [currentUser?.uid]);
 
   // Password strength validation
-  const validatePasswordStrength = (password) => {
-    if (password.length < 8) return "Weak: Password must be at least 8 characters.";
-    if (!/[A-Z]/.test(password)) return "Weak: Password must contain at least one uppercase letter.";
-    if (!/[0-9]/.test(password)) return "Weak: Password must contain at least one number.";
-    if (!/[^A-Za-z0-9]/.test(password)) return "Weak: Password must contain at least one special character.";
+  const validatePasswordStrength = (pwd) => {
+    if (pwd.length < 8) return "Weak: Password must be at least 8 characters.";
+    if (!/[A-Z]/.test(pwd))
+      return "Weak: Password must contain at least one uppercase letter.";
+    if (!/[0-9]/.test(pwd))
+      return "Weak: Password must contain at least one number.";
+    if (!/[^A-Za-z0-9]/.test(pwd))
+      return "Weak: Password must contain at least one special character.";
     return "Strong";
   };
 
@@ -147,7 +162,12 @@ function SignupPage() {
   };
 
   // Retry logic for Firebase operations
-  const withRetry = async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
+  const withRetry = async (
+    operation,
+    callback,
+    maxRetries = 3,
+    retryDelayBase = 1000
+  ) => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await callback();
@@ -161,14 +181,18 @@ function SignupPage() {
             error_message: error.message,
             timestamp: new Date().toISOString(),
           });
-          console.log(`SignupPage - ${operation} retry attempt ${attempt} logged to Firebase Analytics`);
+          console.log(
+            `SignupPage - ${operation} retry attempt ${attempt} logged to Firebase Analytics`
+          );
           hasLoggedRetryPerOperation.current[operation] = true;
         }
         if (attempt === maxRetries) {
           throw error;
         }
         const delay = Math.pow(2, attempt - 1) * retryDelayBase;
-        console.log(`${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`);
+        console.log(
+          `${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`
+        );
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
@@ -202,21 +226,38 @@ function SignupPage() {
 
     // Check if terms are accepted
     if (!agreeToTerms) {
-      setError("You must agree to the Terms of Service and Privacy Policy to sign up.");
+      setError(
+        "You must agree to the Terms of Service and Privacy Policy to sign up."
+      );
       setLoading(false);
       return;
     }
 
     try {
-      // Set persistence based on "Remember Me" checkbox
-      const persistenceType = rememberMe ? browserLocalPersistence : browserSessionPersistence;
-      await withRetry("Set Persistence (Email)", () => setPersistence(auth, persistenceType));
-      console.log(`SignupPage - Set persistence to ${rememberMe ? "LOCAL" : "SESSION"}`);
+      // Set persistence
+      const persistenceType = rememberMe
+        ? browserLocalPersistence
+        : browserSessionPersistence;
+      await withRetry("Set Persistence (Email)", () =>
+        setPersistence(auth, persistenceType)
+      );
+      console.log(
+        `SignupPage - Set persistence to ${
+          rememberMe ? "LOCAL" : "SESSION"
+        }`
+      );
 
       // 1. Create the user in Firebase Auth
-      const userCredential = await withRetry("Email/Password Signup", () => signup(email, password));
+      const userCredential = await withRetry("Email/Password Signup", () =>
+        signup(email, password)
+      );
 
-      // 2. Create a corresponding user doc in Firestore
+      // Double-check userCredential before proceeding
+      if (!userCredential || !userCredential.user || !userCredential.user.uid) {
+        throw new Error("No user information returned from signup.");
+      }
+
+      // 2. Create user doc in Firestore
       await withRetry("Create User Doc", () =>
         setDoc(doc(db, "users", userCredential.user.uid), {
           email,
@@ -232,11 +273,13 @@ function SignupPage() {
           userId: userCredential.user.uid,
           timestamp: new Date().toISOString(),
         });
-        console.log("SignupPage - Email signup success logged to Firebase Analytics");
+        console.log(
+          "SignupPage - Email signup success logged to Firebase Analytics"
+        );
         hasLoggedEmailSignupSuccess.current = true;
       }
 
-      // 3. Show success message and navigate to dashboard
+      // 3. Show success message and navigate
       setSuccessMessage("Account created successfully! Redirecting...");
       redirectTimeoutRef.current = setTimeout(() => {
         navigate("/dashboard");
@@ -245,23 +288,29 @@ function SignupPage() {
     } catch (err) {
       let userFriendlyError = "Failed to create an account. Please try again.";
       if (err.code === "auth/email-already-in-use") {
-        userFriendlyError = "This email is already in use. Please use a different email.";
+        userFriendlyError =
+          "This email is already in use. Please use a different email.";
       } else if (err.code === "auth/invalid-email") {
         userFriendlyError = "Invalid email address.";
       } else if (err.code === "auth/weak-password") {
-        userFriendlyError = "Password is too weak. Please use a stronger password.";
+        userFriendlyError =
+          "Password is too weak. Please use a stronger password.";
       } else if (err.code === "auth/too-many-requests") {
         userFriendlyError = "Too many attempts. Please try again later.";
       } else if (err.code === "auth/network-request-failed") {
-        userFriendlyError = "Network error. Please check your connection and try again.";
+        userFriendlyError =
+          "Network error. Please check your connection and try again.";
       }
+
       setError(userFriendlyError);
+
+      // Log signup failure
       if (analytics) {
         logEvent(analytics, "signup_failed", {
           method: "email",
           userId: currentUser?.uid || "anonymous",
           error_message: userFriendlyError,
-          error_code: err.code,
+          error_code: err.code || "unknown",
           timestamp: new Date().toISOString(),
         });
         console.log("SignupPage - Email signup failure logged to Firebase Analytics");
@@ -288,19 +337,36 @@ function SignupPage() {
 
     // Check if terms are accepted for Google signup
     if (!agreeToTerms) {
-      setError("You must agree to the Terms of Service and Privacy Policy to sign up.");
+      setError(
+        "You must agree to the Terms of Service and Privacy Policy to sign up."
+      );
       setLoading(false);
       return;
     }
 
     try {
-      // Set persistence based on "Remember Me" checkbox
-      const persistenceType = rememberMe ? browserLocalPersistence : browserSessionPersistence;
-      await withRetry("Set Persistence (Google)", () => setPersistence(auth, persistenceType));
-      console.log(`SignupPage - Set persistence to ${rememberMe ? "LOCAL" : "SESSION"} for Google signup`);
+      // Set persistence
+      const persistenceType = rememberMe
+        ? browserLocalPersistence
+        : browserSessionPersistence;
+      await withRetry("Set Persistence (Google)", () =>
+        setPersistence(auth, persistenceType)
+      );
+      console.log(
+        `SignupPage - Set persistence to ${
+          rememberMe ? "LOCAL" : "SESSION"
+        } for Google signup`
+      );
 
       // loginWithGoogle automatically creates or updates the user doc
-      const userCredential = await withRetry("Google Signup", () => loginWithGoogle());
+      const userCredential = await withRetry("Google Signup", () =>
+        loginWithGoogle()
+      );
+
+      // Double-check userCredential
+      if (!userCredential || !userCredential.user || !userCredential.user.uid) {
+        throw new Error("No user information returned from Google signup.");
+      }
 
       // Log Google signup success (only once)
       if (!hasLoggedGoogleSignupSuccess.current && analytics) {
@@ -309,7 +375,9 @@ function SignupPage() {
           userId: userCredential.user.uid,
           timestamp: new Date().toISOString(),
         });
-        console.log("SignupPage - Google signup success logged to Firebase Analytics");
+        console.log(
+          "SignupPage - Google signup success logged to Firebase Analytics"
+        );
         hasLoggedGoogleSignupSuccess.current = true;
       }
 
@@ -325,17 +393,22 @@ function SignupPage() {
       } else if (err.code === "auth/too-many-requests") {
         userFriendlyError = "Too many attempts. Please try again later.";
       } else if (err.code === "auth/network-request-failed") {
-        userFriendlyError = "Network error. Please check your connection and try again.";
+        userFriendlyError =
+          "Network error. Please check your connection and try again.";
       } else if (err.code === "auth/popup-blocked") {
-        userFriendlyError = "Popup blocked by browser. Please allow popups and try again.";
+        userFriendlyError =
+          "Popup blocked by browser. Please allow popups and try again.";
       }
+
       setError(userFriendlyError);
+
+      // Log Google signup failure
       if (analytics) {
         logEvent(analytics, "signup_failed", {
           method: "google",
           userId: currentUser?.uid || "anonymous",
           error_message: userFriendlyError,
-          error_code: err.code,
+          error_code: err.code || "unknown",
           timestamp: new Date().toISOString(),
         });
         console.log("SignupPage - Google signup failure logged to Firebase Analytics");
@@ -353,20 +426,23 @@ function SignupPage() {
           variant="body1"
           sx={{
             mb: 2,
-            fontFamily: "'Poppins', sans-serif'",
+            fontFamily: "'Poppins', sans-serif",
             color: "text.secondary",
           }}
         >
           Loading authentication state...
         </Typography>
-        <CircularProgress sx={{ color: "primary.main" }} aria-label="Loading authentication state" />
+        <CircularProgress
+          sx={{ color: "primary.main" }}
+          aria-label="Loading authentication state"
+        />
       </Container>
     );
   }
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated (handled in useEffect as well)
   if (currentUser) {
-    return null; // Handled by useEffect redirect
+    return null;
   }
 
   return (
@@ -376,20 +452,30 @@ function SignupPage() {
           <Typography
             variant="h5"
             sx={{
-              fontFamily: "'Montserrat', sans-serif'",
+              fontFamily: "'Montserrat', sans-serif",
               mb: 1,
               fontWeight: 700,
             }}
           >
             Sign Up
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "'Poppins', sans-serif'" }}>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ fontFamily: "'Poppins', sans-serif" }}
+          >
             Create your BSP account and start hosting pools!
           </Typography>
         </Box>
 
         {error && (
-          <Alert severity="error" sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }} role="alert" id="signup-error" aria-live="assertive">
+          <Alert
+            severity="error"
+            sx={{ mb: 2, fontFamily: "'Poppins', sans-serif" }}
+            role="alert"
+            id="signup-error"
+            aria-live="assertive"
+          >
             {error}
           </Alert>
         )}
@@ -400,7 +486,12 @@ function SignupPage() {
           onClose={() => setSuccessMessage("")}
           anchorOrigin={{ vertical: "top", horizontal: "center" }}
         >
-          <Alert severity="success" sx={{ fontFamily: "'Poppins', sans-serif'" }} role="alert" aria-live="assertive">
+          <Alert
+            severity="success"
+            sx={{ fontFamily: "'Poppins', sans-serif" }}
+            role="alert"
+            aria-live="assertive"
+          >
             {successMessage}
           </Alert>
         </Snackbar>
@@ -419,11 +510,18 @@ function SignupPage() {
             onChange={(e) => setEmail(e.target.value)}
             required
             fullWidth
-            InputProps={{ sx: { fontFamily: "'Poppins', sans-serif'" } }}
-            InputLabelProps={{ sx: { fontFamily: "'Poppins', sans-serif'", id: "signup-email-label" } }}
+            InputProps={{
+              sx: { fontFamily: "'Poppins', sans-serif" },
+            }}
+            InputLabelProps={{
+              sx: { fontFamily: "'Poppins', sans-serif" },
+              id: "signup-email-label",
+            }}
             inputProps={{
               "aria-label": "Enter your email address",
-              "aria-describedby": error ? "signup-error signup-email-label" : "signup-email-label",
+              "aria-describedby": error
+                ? "signup-error signup-email-label"
+                : "signup-email-label",
             }}
             disabled={loading}
           />
@@ -437,27 +535,39 @@ function SignupPage() {
             fullWidth
             helperText={passwordStrength}
             FormHelperTextProps={{
-              sx: { fontFamily: "'Poppins', sans-serif'", color: passwordStrength.includes("Weak") ? "error.main" : "success.main" },
+              sx: {
+                fontFamily: "'Poppins', sans-serif",
+                color: passwordStrength.includes("Weak")
+                  ? "error.main"
+                  : "success.main",
+              },
               id: "password-helper-text",
             }}
             InputProps={{
-              sx: { fontFamily: "'Poppins', sans-serif'" },
+              sx: { fontFamily: "'Poppins', sans-serif" },
               endAdornment: (
                 <InputAdornment position="end">
                   <IconButton
                     onClick={() => setShowPassword(!showPassword)}
                     edge="end"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                   >
                     {showPassword ? <VisibilityOff /> : <Visibility />}
                   </IconButton>
                 </InputAdornment>
               ),
             }}
-            InputLabelProps={{ sx: { fontFamily: "'Poppins', sans-serif'", id: "signup-password-label" } }}
+            InputLabelProps={{
+              sx: { fontFamily: "'Poppins', sans-serif" },
+              id: "signup-password-label",
+            }}
             inputProps={{
               "aria-label": "Enter your password",
-              "aria-describedby": error ? "signup-error signup-password-label password-helper-text" : "signup-password-label password-helper-text",
+              "aria-describedby": error
+                ? "signup-error signup-password-label password-helper-text"
+                : "signup-password-label password-helper-text",
             }}
             disabled={loading}
           />
@@ -472,7 +582,7 @@ function SignupPage() {
               />
             }
             label="Remember Me"
-            sx={{ fontFamily: "'Poppins', sans-serif'" }}
+            sx={{ fontFamily: "'Poppins', sans-serif" }}
           />
           <FormControlLabel
             control={
@@ -482,17 +592,33 @@ function SignupPage() {
                 color="primary"
                 required
                 disabled={loading}
-                inputProps={{ "aria-label": "Agree to Terms of Service and Privacy Policy checkbox" }}
+                inputProps={{
+                  "aria-label":
+                    "Agree to Terms of Service and Privacy Policy checkbox",
+                }}
               />
             }
             label={
-              <Typography variant="body2" sx={{ fontFamily: "'Poppins', sans-serif'" }}>
+              <Typography
+                variant="body2"
+                sx={{ fontFamily: "'Poppins', sans-serif" }}
+              >
                 I agree to the{" "}
-                <Link component={RouterLink} to="/tos" sx={{ textDecoration: "none" }} aria-label="Terms of Service">
+                <Link
+                  component={RouterLink}
+                  to="/tos"
+                  sx={{ textDecoration: "none" }}
+                  aria-label="Terms of Service"
+                >
                   Terms of Service
                 </Link>{" "}
                 and{" "}
-                <Link component={RouterLink} to="/privacy" sx={{ textDecoration: "none" }} aria-label="Privacy Policy">
+                <Link
+                  component={RouterLink}
+                  to="/privacy"
+                  sx={{ textDecoration: "none" }}
+                  aria-label="Privacy Policy"
+                >
                   Privacy Policy
                 </Link>
               </Typography>
@@ -503,7 +629,7 @@ function SignupPage() {
             type="submit"
             variant="contained"
             color="primary"
-            sx={{ fontFamily: "'Poppins', sans-serif'" }}
+            sx={{ fontFamily: "'Poppins', sans-serif" }}
             disabled={loading || !agreeToTerms}
             aria-label="Sign up with email and password"
           >
@@ -517,7 +643,7 @@ function SignupPage() {
             variant="outlined"
             onClick={handleGoogleSignUp}
             color="secondary"
-            sx={{ fontFamily: "'Poppins', sans-serif'" }}
+            sx={{ fontFamily: "'Poppins', sans-serif" }}
             disabled={loading || !agreeToTerms}
             aria-label="Sign up with Google"
           >
