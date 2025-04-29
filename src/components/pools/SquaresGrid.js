@@ -73,30 +73,14 @@ const AxisLabel = styled(Box)(({ theme, isMobile }) => ({
   boxShadow: theme.shadows[1],
 }));
 
-const Square = styled(Button)(({ theme, isClaimed, isQ1Winner, isQ2Winner, isQ3Winner, isFinalWinner, isMobile }) => ({
-  minWidth: isMobile ? "60px" : "72px",
-  minHeight: isMobile ? "60px" : "72px",
+const Square = styled(Button)(({ theme }) => ({
   padding: 0,
-  backgroundColor: isFinalWinner
-    ? theme.palette.mode === "dark" ? "#ff9500" : "#f97316"
-    : isQ1Winner || isQ2Winner || isQ3Winner
-    ? theme.palette.mode === "dark" ? "#6b7280" : "#9ca3af"
-    : isClaimed
-    ? "#facc15"
-    : theme.palette.mode === "dark" ? "#d1d5db" : "#ffffff",
-  color: isFinalWinner || isQ1Winner || isQ2Winner || isQ3Winner
-    ? "#ffffff"
-    : isClaimed
-    ? "#1e40af"
-    : theme.palette.text.primary,
   fontFamily: "'Poppins', sans-serif'",
-  fontSize: isMobile ? "1.08rem" : "1.2rem",
   fontWeight: 600,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   border: "1px solid",
-  borderColor: theme.palette.mode === "dark" ? "#ff9500" : "#3b82f6",
   borderRadius: theme.shape.borderRadius,
   cursor: "pointer",
   transition: theme.transitions.create(["transform", "box-shadow", "border-color"], {
@@ -106,14 +90,6 @@ const Square = styled(Button)(({ theme, isClaimed, isQ1Winner, isQ2Winner, isQ3W
   "&:hover": {
     transform: "scale(1.1)",
     boxShadow: theme.shadows[3],
-    borderColor: theme.palette.mode === "dark" ? "#f97316" : "#1e40af",
-    backgroundColor: isFinalWinner
-      ? theme.palette.mode === "dark" ? "#fb923c" : "#fb923c"
-      : isQ1Winner || isQ2Winner || isQ3Winner
-      ? theme.palette.mode === "dark" ? "#9ca3af" : "#d1d5db"
-      : isClaimed
-      ? "#fef08a"
-      : theme.palette.grey[300],
   },
   "&:focus-visible": {
     outline: `2px solid ${theme.palette.mode === "dark" ? "#ff9500" : "#3b82f6"}`,
@@ -329,7 +305,6 @@ function SquaresGrid({ poolId, poolData }) {
     hasLoggedGridLoad.current = false;
     hasLoggedError.current = false;
     hasLoggedJoinPool.current = false;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poolId, user, poolData, analytics]);
 
   // Debounced handleRefresh to prevent rapid successive calls
@@ -797,21 +772,37 @@ function SquaresGrid({ poolId, poolData }) {
                 <Square
                   onClick={() => handleSquareClick(sq.id, sq.userId)}
                   onKeyDown={(e) => handleKeyDown(e, sq.id, sq.userId, row, col)}
-                  isClaimed={isClaimed}
-                  isQ1Winner={isQ1Winner}
-                  isQ2Winner={isQ2Winner}
-                  isQ3Winner={isQ3Winner}
-                  isFinalWinner={isFinalWinner}
-                  isMobile={isMobile}
+                  sx={{
+                    minWidth: isMobile ? "60px" : "72px",
+                    minHeight: isMobile ? "60px" : "72px",
+                    backgroundColor: isFinalWinner
+                      ? mode === "dark" ? "#ff9500" : "#f97316"
+                      : isQ1Winner || isQ2Winner || isQ3Winner
+                      ? mode === "dark" ? "#6b7280" : "#9ca3af"
+                      : isClaimed
+                      ? "#facc15"
+                      : mode === "dark" ? "#d1d5db" : "#ffffff",
+                    color: isFinalWinner || isQ1Winner || isQ2Winner || isQ3Winner
+                      ? "#ffffff"
+                      : isClaimed
+                      ? "#1e40af"
+                      : theme.palette.text.primary,
+                    fontSize: isMobile ? "1.08rem" : "1.2rem",
+                    borderColor: mode === "dark" ? "#ff9500" : "#3b82f6",
+                    "&:hover": {
+                      borderColor: mode === "dark" ? "#f97316" : "#1e40af",
+                      backgroundColor: isFinalWinner
+                        ? mode === "dark" ? "#fb923c" : "#fb923c"
+                        : isQ1Winner || isQ2Winner || isQ3Winner
+                        ? mode === "dark" ? "#9ca3af" : "#d1d5db"
+                        : isClaimed
+                        ? "#fef08a"
+                        : theme.palette.grey[300],
+                    },
+                  }}
                   aria-label={ariaLabel}
                   data-square-index={index}
                   tabIndex={0}
-                  data-ismobile={isMobile.toString()}
-                  data-isclaimed={isClaimed.toString()}
-                  data-isq1winner={isQ1Winner.toString()}
-                  data-isq2winner={isQ2Winner.toString()}
-                  data-isq3winner={isQ3Winner.toString()}
-                  data-isfinalwinner={isFinalWinner.toString()}
                 >
                   {isFinalWinner ? "🏆" : isQ1Winner || isQ2Winner || isQ3Winner ? "⭐" : isClaimed ? (sq.displayName || "Claimed") : "Empty"}
                 </Square>

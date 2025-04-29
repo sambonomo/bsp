@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useContext, useRef } from "react";
+import React, { useState, useEffect, useContext, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Box, CssBaseline, Container, Typography, Alert, CircularProgress, Fade, Button } from "@mui/material";
 import { AuthContext } from "./contexts/AuthContext";
-import { SubscriptionContext } from "./contexts/SubscriptionContext";
-import { ThemeContext } from "./contexts/ThemeContext";
+import { SubscriptionContext, SubscriptionProvider } from "./contexts/SubscriptionContext";
+import { ThemeContext, ThemeProvider } from "./contexts/ThemeContext";
 import { getAnalyticsService } from "./firebase/config";
 import { logEvent } from "firebase/analytics";
 import Navbar from "./components/layout/Navbar";
@@ -11,7 +11,59 @@ import Footer from "./components/layout/Footer";
 import AdBanner from "./components/common/AdBanner";
 import AppRoutes from "./routes/AppRoutes";
 
-// MainApp component to encapsulate logic that uses useNavigate
+// Error Boundary Component
+class ErrorBoundary extends React.Component {
+  state = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+    const analytics = getAnalyticsService();
+    if (analytics) {
+      logEvent(analytics, "error_boundary_caught", {
+        error_message: error.message,
+        error_stack: error.stack,
+        component_stack: errorInfo.componentStack,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("ErrorBoundary - Error logged to Firebase Analytics");
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Box sx={{ p: 4, textAlign: "center" }}>
+          <Alert severity="error" sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }} role="alert" aria-live="assertive">
+            Something went wrong: {this.state.error?.message || "Unknown error"}
+          </Alert>
+          <Typography variant="body1" sx={{ fontFamily: "'Poppins', sans-serif'" }}>
+            Please try refreshing the page, or contact{" "}
+            <Box
+              component="a"
+              href="mailto:support@bonomosportspools.com"
+              sx={{ color: (theme) => theme.palette.primary.main, textDecoration: "none", "&:hover": { textDecoration: "underline" } }}
+              aria-label="Contact support via email"
+            >
+              support@bonomosportspools.com
+            </Box>{" "}
+            for assistance.
+          </Typography>
+        </Box>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/**
+ * Main application component that handles navigation, context, and analytics.
+ * Manages loading states, error handling, and ad banner display based on subscription tier.
+ * @returns {JSX.Element} The rendered main application layout.
+ */
 function MainApp() {
   const { theme: muiTheme } = useContext(ThemeContext);
   const { user, authLoading } = useContext(AuthContext);
@@ -153,8 +205,11 @@ function MainApp() {
     return () => clearTimeout(timeout);
   }, [authLoading, subLoading, isLoading, user?.uid, retryCount, analytics]);
 
-  // Manual retry loading contexts
-  const handleRetry = () => {
+  /**
+   * Handles manual retry of loading contexts when a timeout occurs.
+   * @returns {void}
+   */
+  const handleRetry = useCallback(() => {
     if (retryCount >= maxRetries) {
       setError(
         "Maximum retry attempts reached. Please check your network connection or contact support at support@bonomosportspools.com."
@@ -189,7 +244,7 @@ function MainApp() {
     }
 
     window.location.reload();
-  };
+  }, [retryCount, user?.uid, analytics]);
 
   // Log ad banner display (only once per session)
   const showAds = user && subscriptionTier === "Bronze";
@@ -367,8 +422,20 @@ function MainApp() {
   );
 }
 
+/**
+ * Root component that renders the MainApp with necessary providers.
+ * @returns {JSX.Element} The rendered application.
+ */
 function App() {
-  return <MainApp />;
+  return (
+    <ErrorBoundary>
+      <ThemeProvider>
+        <SubscriptionProvider>
+          <MainApp />
+        </SubscriptionProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
+  );
 }
 
 export default App;

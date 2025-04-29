@@ -1,17 +1,13 @@
-import React, { useState, useEffect, useRef } from "react";
-import { getDb, getAnalyticsService } from "../../firebase/config"; // Updated imports
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { getDb, getAnalyticsService } from "../../firebase/config";
 import {
-  collection,
-  query,
-  orderBy,
-  onSnapshot,
-  updateDoc,
   doc,
-  runTransaction,
-  serverTimestamp,
   getDoc,
-  setDoc,
+  updateDoc,
+  runTransaction,
   arrayUnion,
+  setDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { useAuth } from "../../contexts/AuthContext";
 import { useThemeContext } from "../../contexts/ThemeContext";
@@ -53,43 +49,20 @@ const ListContainer = styled(Box)(({ theme }) => ({
   overflowX: "auto", // Ensure horizontal scrolling if needed
 }));
 
-const StripItem = styled(ListItem)(({ theme, isClaimed, isQ1Winner, isQ2Winner, isQ3Winner, isFinalWinner }) => ({
-  backgroundColor: isFinalWinner
-    ? theme.palette.secondary.main
-    : isQ1Winner || isQ2Winner || isQ3Winner
-    ? theme.palette.mode === "dark"
-      ? theme.palette.grey[600]
-      : theme.palette.grey[200]
-    : isClaimed
-    ? theme.palette.mode === "dark"
-      ? theme.palette.grey[900]
-      : theme.palette.grey[500]
-    : theme.palette.grey[300],
-  color: isFinalWinner || isQ1Winner || isQ2Winner || isQ3Winner
-    ? theme.palette.text.primary
-    : theme.palette.text.contrastText,
-  fontFamily: "'Poppins', sans-serif",
-  fontSize: "0.9rem",
+const StripItem = styled(ListItem)(({ theme }) => ({
   marginBottom: theme.spacing(1),
   padding: theme.spacing(1),
   border: "1px solid",
-  borderColor: theme.palette.divider,
   borderRadius: theme.shape.borderRadius / 2,
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  cursor: isClaimed ? "not-allowed" : "pointer",
   transition: theme.transitions.create(["transform", "box-shadow", "border-color"], {
     duration: theme.transitions.duration.standard,
     easing: theme.transitions.easing.easeInOut,
   }),
-  "&:hover": {
-    transform: !isClaimed ? "scale(1.02)" : "none",
-    boxShadow: !isClaimed ? theme.shadows[2] : "none",
-    borderColor: !isClaimed ? theme.palette.secondary.main : undefined,
-  },
   "&:focus-visible": {
-    outline: !isClaimed ? `2px solid ${theme.palette.secondary.main}` : "none",
+    outline: `2px solid ${theme.palette.secondary.main}`,
     outlineOffset: 2,
   },
 }));
@@ -109,7 +82,7 @@ function StripCardList({ poolId, poolData }) {
   const hasLoggedClaim = useRef(false);
   const hasLoggedError = useRef(false);
   const hasLoggedJoinPool = useRef(false);
-  const db = getDb(); // Updated to use accessor
+  const db = getDb();
 
   // Initialize analytics
   useEffect(() => {
@@ -118,7 +91,7 @@ function StripCardList({ poolId, poolData }) {
   }, []);
 
   // Retry logic for Firebase operations
-  const withRetry = async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
+  const withRetry = useCallback(async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await callback();
@@ -141,20 +114,20 @@ function StripCardList({ poolId, poolData }) {
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
-  };
+  }, [analytics, user?.uid]);
 
-  // Fetch strips data with live updates
+  // Fetch user role and strips data
   useEffect(() => {
-    if (!poolId || !poolData) {
-      setError("Pool ID and pool data are required.");
-      console.error("StripCardList - Missing poolId or poolData:", { poolId, poolData });
+    if (!poolId || !poolData || !user) {
+      setError("Pool ID, pool data, or user authentication is missing.");
+      console.error("StripCardList - Missing required data:", { poolId, poolData, user });
       setLoading(false);
       if (analytics && !hasLoggedError.current) {
         logEvent(analytics, "fetch_strips_failed", {
           poolId: poolId || "missing",
           userId: user?.uid || "anonymous",
           user_role: userRole || "unknown",
-          error_message: "Pool ID and pool data are required.",
+          error_message: "Pool ID, pool data, or user authentication is missing.",
           timestamp: new Date().toISOString(),
         });
         console.log("StripCardList - Fetch strips failure logged to Firebase Analytics");
@@ -169,88 +142,43 @@ function StripCardList({ poolId, poolData }) {
 
       // Determine user role
       let role = "none";
-      if (user?.uid === poolData.commissionerId) {
+      if (user.uid === poolData.commissionerId) {
         role = "commissioner";
-      }
-      const participantDocRef = doc(db, "pools", poolId, "participants", user?.uid || "anonymous");
-      const participantDoc = await getDoc(participantDocRef);
-      if (participantDoc.exists()) {
-        role = "participant";
-      } else if (poolData.memberIds?.includes(user?.uid)) {
-        role = "participant";
+      } else {
+        const participantDocRef = doc(db, "pools", poolId, "participants", user.uid);
+        const participantDoc = await getDoc(participantDocRef);
+        if (participantDoc.exists() || poolData.memberIds?.includes(user.uid)) {
+          role = "participant";
+        }
       }
       setUserRole(role);
       console.log("StripCardList - User role:", role);
 
-      const stripsRef = collection(db, "pools", poolId, "strips");
-      const q = query(stripsRef, orderBy("stripNumber", "asc"));
+      // Since strips are a field in poolData (not a subcollection), use poolData.strips
+      const stripsData = poolData.strips || [];
+      // Sort strips by stripNumber
+      const sortedStrips = [...stripsData].sort((a, b) => a.number - b.number);
+      setStrips(sortedStrips);
+      setLoading(false);
+      console.log("StripCardList - Fetched strips:", sortedStrips);
 
-      const unsubscribe = await withRetry("Fetch Strips", () =>
-        onSnapshot(
-          q,
-          (snapshot) => {
-            const data = snapshot.docs.map((docSnap) => ({
-              id: docSnap.id,
-              ...docSnap.data(),
-            }));
-            setStrips(data);
-            setLoading(false);
-            console.log("StripCardList - Fetched strips:", data);
+      // Validate strips data
+      if (sortedStrips.length < 10) {
+        console.warn("StripCardList - Expected at least 10 strips, got:", sortedStrips.length);
+      }
 
-            // Validate strips data
-            if (data.length < 10) {
-              console.warn("StripCardList - Expected at least 10 strips, got:", data.length);
-            }
-
-            // Log strip card list load (only once)
-            if (!hasLoggedListLoad.current && analytics) {
-              logEvent(analytics, "strip_card_list_loaded", {
-                poolId,
-                userId: user?.uid || "anonymous",
-                user_role: role,
-                stripCount: data.length,
-                timestamp: new Date().toISOString(),
-              });
-              console.log("StripCardList - List load logged to Firebase Analytics");
-              hasLoggedListLoad.current = true;
-            }
-          },
-          (err) => {
-            console.error("StripCardList - Error fetching strips:", err);
-            let userFriendlyError = "Failed to fetch strip cards.";
-            if (err.code === "permission-denied") {
-              userFriendlyError = `You do not have permission to view strip cards for this pool (Role: ${role}). Please ensure you have joined the pool or contact the pool commissioner.`;
-            } else if (err.code === "unavailable") {
-              userFriendlyError = "Firestore is currently unavailable. Please try again later.";
-            }
-            setError(userFriendlyError);
-            setLoading(false);
-            if (analytics && !hasLoggedError.current) {
-              logEvent(analytics, "fetch_strips_failed", {
-                poolId,
-                userId: user?.uid || "anonymous",
-                user_role: role,
-                pool_commissioner_id: poolData.commissionerId,
-                user_in_participants: role === "participant",
-                user_in_member_ids: poolData.memberIds?.includes(user?.uid),
-                strips_count: strips.length,
-                strip_numbers: poolData.stripNumbers?.length || "missing",
-                error_message: userFriendlyError,
-                timestamp: new Date().toISOString(),
-              });
-              console.log("StripCardList - Fetch strips failure logged to Firebase Analytics");
-              hasLoggedError.current = true;
-            }
-          }
-        )
-      );
-
-      return () => {
-        if (unsubscribe) {
-          unsubscribe();
-          console.log("StripCardList - Unsubscribed from live updates for poolId:", poolId);
-        }
-      };
+      // Log strip card list load (only once)
+      if (!hasLoggedListLoad.current && analytics) {
+        logEvent(analytics, "strip_card_list_loaded", {
+          poolId,
+          userId: user.uid,
+          user_role: role,
+          stripCount: sortedStrips.length,
+          timestamp: new Date().toISOString(),
+        });
+        console.log("StripCardList - List load logged to Firebase Analytics");
+        hasLoggedListLoad.current = true;
+      }
     };
 
     fetchStrips();
@@ -259,7 +187,7 @@ function StripCardList({ poolId, poolData }) {
     hasLoggedListLoad.current = false;
     hasLoggedError.current = false;
     hasLoggedJoinPool.current = false;
-  }, [poolId, user?.uid, poolData, analytics]); // Added analytics to dependencies
+  }, [poolId, poolData, user, userRole, analytics, db]); // Added db, user, and userRole to dependencies
 
   // Handle manual refresh
   const handleRefresh = () => {
@@ -341,7 +269,7 @@ function StripCardList({ poolId, poolData }) {
   };
 
   // Handle claiming a strip card
-  const handleClaimStrip = async (stripId, ownerId) => {
+  const handleClaimStrip = async (stripNumber, ownerId) => {
     if (!user) {
       setError("Please log in to claim a strip card.");
       console.warn("handleClaimStrip - User not logged in");
@@ -349,7 +277,7 @@ function StripCardList({ poolId, poolData }) {
     }
     if (ownerId) {
       setError("Strip card already claimed!");
-      console.warn("handleClaimStrip - Strip already claimed:", stripId);
+      console.warn("handleClaimStrip - Strip already claimed:", stripNumber);
       return;
     }
     if (poolData.status !== "open") {
@@ -358,48 +286,57 @@ function StripCardList({ poolId, poolData }) {
       return;
     }
 
-    setPendingStrip({ stripId, ownerId });
+    setPendingStrip({ stripNumber, ownerId });
     setConfirmDialogOpen(true);
   };
 
   const confirmClaimStrip = async () => {
     if (!pendingStrip) return;
 
-    const { stripId } = pendingStrip;
+    const { stripNumber } = pendingStrip;
 
     try {
       setError("");
-      const stripRef = doc(db, "pools", poolId, "strips", stripId);
+      const poolRef = doc(db, "pools", poolId);
 
       // Use a transaction to ensure atomicity and prevent race conditions
       await withRetry("Claim Strip Transaction", () =>
         runTransaction(db, async (transaction) => {
-          const stripDoc = await transaction.get(stripRef);
-          if (!stripDoc.exists()) {
+          const poolDoc = await transaction.get(poolRef);
+          if (!poolDoc.exists()) {
+            throw new Error("Pool does not exist.");
+          }
+
+          const poolData = poolDoc.data();
+          const stripIndex = poolData.strips.findIndex(strip => strip.number === stripNumber);
+          if (stripIndex === -1) {
             throw new Error("Strip card does not exist.");
           }
 
-          const stripData = stripDoc.data();
-          if (stripData.ownerId) {
+          if (poolData.strips[stripIndex].userId) {
             throw new Error("Strip card has already been claimed by another user.");
           }
 
-          transaction.update(stripRef, {
-            ownerId: user.uid,
-            displayName: user.email || user.displayName || "Anonymous",
+          const updatedStrips = [...poolData.strips];
+          updatedStrips[stripIndex] = {
+            ...updatedStrips[stripIndex],
+            userId: user.uid,
+            displayName: user.displayName || user.email || "Anonymous",
             claimedAt: serverTimestamp(),
-          });
+          };
+
+          transaction.update(poolRef, { strips: updatedStrips });
         })
       );
 
       setSuccessMessage("Strip card claimed successfully!");
-      console.log("handleClaimStrip - Claimed strip:", stripId, "by user:", user.uid);
+      console.log("handleClaimStrip - Claimed strip:", stripNumber, "by user:", user.uid);
 
       // Log strip claim (only once)
       if (!hasLoggedClaim.current && analytics) {
         logEvent(analytics, "strip_card_claimed_success", {
           poolId,
-          stripId,
+          stripNumber,
           userId: user.uid,
           user_role: userRole || "unknown",
           timestamp: new Date().toISOString(),
@@ -421,7 +358,7 @@ function StripCardList({ poolId, poolData }) {
       if (analytics) {
         logEvent(analytics, "strip_card_claimed_failure", {
           poolId,
-          stripId,
+          stripNumber,
           userId: user?.uid || "anonymous",
           user_role: userRole || "unknown",
           error_message: userFriendlyError,
@@ -442,7 +379,7 @@ function StripCardList({ poolId, poolData }) {
     if (analytics) {
       logEvent(analytics, "strip_card_claim_canceled", {
         poolId,
-        stripId: pendingStrip?.stripId,
+        stripNumber: pendingStrip?.stripNumber,
         userId: user?.uid || "anonymous",
         user_role: userRole || "unknown",
         timestamp: new Date().toISOString(),
@@ -452,10 +389,10 @@ function StripCardList({ poolId, poolData }) {
   };
 
   // Keyboard navigation handler for strips
-  const handleKeyDown = (event, stripId, ownerId, index) => {
+  const handleKeyDown = (event, stripNumber, ownerId, index) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      handleClaimStrip(stripId, ownerId);
+      handleClaimStrip(stripNumber, ownerId);
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       const nextIndex = (index + 1) % strips.length;
@@ -556,19 +493,19 @@ function StripCardList({ poolId, poolData }) {
           <List sx={{ p: 0 }} role="list" aria-label="List of strip cards">
             {strips.map((strip, index) => {
               const digit = stripDigits[index] !== undefined ? stripDigits[index] : "?";
-              const isClaimed = !!strip.ownerId;
-              const isQ1Winner = strip.stripNumber === winners.q1;
-              const isQ2Winner = strip.stripNumber === winners.q2;
-              const isQ3Winner = strip.stripNumber === winners.q3;
-              const isFinalWinner = strip.stripNumber === winners.final;
+              const isClaimed = !!strip.userId;
+              const isQ1Winner = strip.number === winners.q1;
+              const isQ2Winner = strip.number === winners.q2;
+              const isQ3Winner = strip.number === winners.q3;
+              const isFinalWinner = strip.number === winners.final;
 
               // Tooltip content
               const tooltipTitle = isClaimed
-                ? `Claimed by: ${strip.displayName || "User " + strip.ownerId?.slice(0, 8)}\nStrip: ${strip.stripNumber} (Digit: ${digit})`
-                : `Strip: ${strip.stripNumber} (Digit: ${digit})\nClick to claim`;
+                ? `Claimed by: ${strip.displayName || "User " + strip.userId?.slice(0, 8)}\nStrip: ${strip.number} (Digit: ${digit})`
+                : `Strip: ${strip.number} (Digit: ${digit})\nClick to claim`;
 
               const ariaLabel = isClaimed
-                ? `Strip ${strip.stripNumber}, digit ${digit}, claimed by ${strip.displayName || "User " + strip.ownerId?.slice(0, 8)}, ${
+                ? `Strip ${strip.number}, digit ${digit}, claimed by ${strip.displayName || "User " + strip.userId?.slice(0, 8)}, ${
                     isFinalWinner
                       ? "Final Winner"
                       : isQ1Winner
@@ -579,18 +516,38 @@ function StripCardList({ poolId, poolData }) {
                       ? "Q3 Winner"
                       : "No winner"
                   }`
-                : `Strip ${strip.stripNumber}, digit ${digit}, unclaimed, press to claim`;
+                : `Strip ${strip.number}, digit ${digit}, unclaimed, press to claim`;
 
               return (
-                <Tooltip key={strip.id} title={tooltipTitle} arrow>
+                <Tooltip key={strip.number} title={tooltipTitle} arrow>
                   <StripItem
-                    onClick={() => handleClaimStrip(strip.id, strip.ownerId)}
-                    onKeyDown={(e) => handleKeyDown(e, strip.id, strip.ownerId, index)}
-                    isClaimed={isClaimed}
-                    isQ1Winner={isQ1Winner}
-                    isQ2Winner={isQ2Winner}
-                    isQ3Winner={isQ3Winner}
-                    isFinalWinner={isFinalWinner}
+                    onClick={() => handleClaimStrip(strip.number, strip.userId)}
+                    onKeyDown={(e) => handleKeyDown(e, strip.number, strip.userId, index)}
+                    sx={{
+                      backgroundColor: isFinalWinner
+                        ? (theme) => theme.palette.secondary.main
+                        : isQ1Winner || isQ2Winner || isQ3Winner
+                        ? mode === "dark"
+                          ? (theme) => theme.palette.grey[600]
+                          : (theme) => theme.palette.grey[200]
+                        : isClaimed
+                        ? mode === "dark"
+                          ? (theme) => theme.palette.grey[900]
+                          : (theme) => theme.palette.grey[500]
+                        : (theme) => theme.palette.grey[300],
+                      color: isFinalWinner || isQ1Winner || isQ2Winner || isQ3Winner
+                        ? (theme) => theme.palette.text.primary
+                        : (theme) => theme.palette.text.contrastText,
+                      fontFamily: "'Poppins', sans-serif",
+                      fontSize: "0.9rem",
+                      borderColor: (theme) => theme.palette.divider,
+                      cursor: isClaimed ? "not-allowed" : "pointer",
+                      "&:hover": {
+                        transform: !isClaimed ? "scale(1.02)" : "none",
+                        boxShadow: !isClaimed ? (theme) => theme.shadows[2] : "none",
+                        borderColor: !isClaimed ? (theme) => theme.palette.secondary.main : undefined,
+                      },
+                    }}
                     tabIndex={isClaimed ? -1 : 0}
                     role="listitem"
                     aria-label={ariaLabel}
@@ -600,7 +557,7 @@ function StripCardList({ poolId, poolData }) {
                       variant="body1"
                       sx={{ fontWeight: 500, fontFamily: "'Poppins', sans-serif'" }}
                     >
-                      Strip #{strip.stripNumber} (Digit: {digit})
+                      Strip #{strip.number} (Digit: {digit})
                     </Typography>
                     {isClaimed && (
                       <Typography
@@ -610,7 +567,7 @@ function StripCardList({ poolId, poolData }) {
                           color: mode === "dark" ? (theme) => theme.palette.text.secondary : (theme) => theme.palette.grey[700],
                         }}
                       >
-                        Claimed by {strip.displayName || "User " + strip.ownerId?.slice(0, 8)}
+                        Claimed by {strip.displayName || "User " + strip.userId?.slice(0, 8)}
                       </Typography>
                     )}
                   </StripItem>
@@ -678,7 +635,7 @@ function StripCardList({ poolId, poolData }) {
           </DialogTitle>
           <DialogContent id="confirm-claim-content">
             <Typography sx={{ fontFamily: "'Poppins', sans-serif'" }}>
-              Are you sure you want to claim Strip Card {pendingStrip?.stripId}?
+              Are you sure you want to claim Strip Card #{pendingStrip?.stripNumber}?
             </Typography>
           </DialogContent>
           <DialogActions>

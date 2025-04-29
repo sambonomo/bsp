@@ -115,7 +115,7 @@ function Dashboard() {
   const hasLoggedFilterChange = useRef(false);
   const hasLoggedSortChange = useRef(false);
   const hasLoggedPoolCardClick = useRef({});
-  const hasLoggedManagePoolClick = useRef({}); // Added for manage pool click logging
+  const hasLoggedManagePoolClick = useRef({});
   const hasLoggedCreatePoolClick = useRef(false);
   const hasLoggedJoinPoolClick = useRef(false);
   const hasLoggedLoadMore = useRef(false);
@@ -633,7 +633,7 @@ function Dashboard() {
     hasLoggedFilterChange.current = false;
     hasLoggedSortChange.current = false;
     hasLoggedPoolCardClick.current = {};
-    hasLoggedManagePoolClick.current = {}; // Reset for manage pool clicks
+    hasLoggedManagePoolClick.current = {};
     hasLoggedCreatePoolClick.current = false;
     hasLoggedJoinPoolClick.current = false;
     hasLoggedLoadMore.current = false;

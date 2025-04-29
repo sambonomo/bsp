@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, Link as RouterLink } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { getAnalyticsService } from "../firebase/config"; // Updated import
+import { getAnalyticsService } from "../firebase/config";
 import { logEvent } from "firebase/analytics";
 import { Box, Typography, Button, CircularProgress, Fade } from "@mui/material";
 import { lazy, Suspense } from "react";
@@ -21,6 +21,7 @@ const Account = lazy(() => import("../pages/Account"));
 const ChangePassword = lazy(() => import("../pages/ChangePassword"));
 const PoolList = lazy(() => import("../components/pools/PoolList"));
 const PoolDashboard = lazy(() => import("../components/pools/PoolDashboard"));
+const CommissionerSettingsPage = lazy(() => import("../pages/CommissionerSettingsPage"));
 
 // ProtectedRoute component to restrict access to authenticated users
 function ProtectedRoute({ element }) {
@@ -217,6 +218,7 @@ function AppRoutes() {
             <Route path="/pool/:poolId" element={<ProtectedRoute element={<PoolDashboard />} />} />
             <Route path="/manage-pool/:poolId" element={<ProtectedRoute element={<ManagePool />} />} />
             <Route path="/manage-matchups/:poolId" element={<ProtectedRoute element={<ManageMatchupsPage />} />} />
+            <Route path="/commissioner-settings/:poolId" element={<ProtectedRoute element={<CommissionerSettingsPage />} />} />
             <Route path="/account" element={<ProtectedRoute element={<Account />} />} />
             <Route path="/change-password" element={<ProtectedRoute element={<ChangePassword />} />} />
 

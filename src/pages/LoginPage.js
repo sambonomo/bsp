@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate, useLocation, Link as RouterLink } from "react-router-dom";
-import { getAnalyticsService, getAuthService } from "../firebase/config"; // Updated imports
+import { getAuthService, getAnalyticsService } from "../firebase/config";
 import { logEvent } from "firebase/analytics";
 import {
   Container,
@@ -85,20 +85,19 @@ function LoginPage() {
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [analytics, setAnalytics] = useState(null); // State for analytics
+  const [analytics, setAnalytics] = useState(null);
   const { login, loginWithGoogle, currentUser, authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const auth = getAuthService(); // Initialize auth with accessor
+  const auth = getAuthService();
   const hasLoggedPageView = useRef(false);
   const hasLoggedEmailLoginSuccess = useRef(false);
-  const hasLoggedGoogleLoginSuccess = useRef(false);
   const hasLoggedGoogleLoginClick = useRef(false);
   const hasLoggedForgotPasswordClick = useRef(false);
   const hasLoggedSignupClick = useRef(false);
   const hasLoggedRememberMe = useRef(false);
   const hasLoggedRetryPerOperation = useRef({}); // Track retry logging per operation
-  const redirectTimeoutRef = useRef(null); // Track redirect timeout
+  const redirectTimeoutRef = useRef(null);
 
   // Initialize analytics
   useEffect(() => {
@@ -116,7 +115,7 @@ function LoginPage() {
       console.log("LoginPage - Page view logged to Firebase Analytics");
       hasLoggedPageView.current = true;
     }
-  }, [currentUser?.uid, analytics]); // Added analytics to dependencies
+  }, [currentUser?.uid, analytics]);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -140,7 +139,6 @@ function LoginPage() {
   useEffect(() => {
     hasLoggedPageView.current = false;
     hasLoggedEmailLoginSuccess.current = false;
-    hasLoggedGoogleLoginSuccess.current = false;
     hasLoggedGoogleLoginClick.current = false;
     hasLoggedForgotPasswordClick.current = false;
     hasLoggedSignupClick.current = false;
@@ -197,12 +195,12 @@ function LoginPage() {
     }
 
     try {
-      // Set persistence with retry
+      // Set persistence
       const persistenceType = rememberMe ? browserLocalPersistence : browserSessionPersistence;
-      await withRetry("Set Persistence (Email)", () => setPersistence(auth, persistenceType));
+      await setPersistence(auth, persistenceType);
       console.log(`LoginPage - Set persistence to ${rememberMe ? "LOCAL" : "SESSION"}`);
 
-      await withRetry("Email/Password Login", () => login(email, password));
+      await login(email, password);
       setSuccessMessage("Login successful! Redirecting...");
       if (!hasLoggedEmailLoginSuccess.current && analytics) {
         logEvent(analytics, "login_success", {
@@ -249,13 +247,13 @@ function LoginPage() {
     }
   };
 
-  // Google sign in
+  // Google sign-in
   const handleGoogleLogin = async () => {
     setError("");
     setLoading(true);
 
     if (!hasLoggedGoogleLoginClick.current && analytics) {
-      logEvent(analytics, "google_login_clicked", {
+      logEvent(analytics, "login_click_google", {
         userId: currentUser?.uid || "anonymous",
         timestamp: new Date().toISOString(),
       });
@@ -269,32 +267,15 @@ function LoginPage() {
       await withRetry("Set Persistence (Google)", () => setPersistence(auth, persistenceType));
       console.log(`LoginPage - Set persistence to ${rememberMe ? "LOCAL" : "SESSION"} for Google login`);
 
+      // Use loginWithGoogle from AuthContext, which now uses signInWithRedirect
       await withRetry("Google Login", () => loginWithGoogle());
-      setSuccessMessage("Login successful! Redirecting...");
-      if (!hasLoggedGoogleLoginSuccess.current && analytics) {
-        logEvent(analytics, "login_success", {
-          method: "google",
-          userId: currentUser?.uid || "anonymous",
-          timestamp: new Date().toISOString(),
-        });
-        console.log("LoginPage - Google login success logged to Firebase Analytics");
-        hasLoggedGoogleLoginSuccess.current = true;
-      }
-      const redirectTo = location.state?.from || "/dashboard";
-      redirectTimeoutRef.current = setTimeout(() => {
-        navigate(redirectTo, { replace: true });
-        redirectTimeoutRef.current = null;
-      }, 2000);
+      // Note: No further action needed here; redirect result is handled in AuthContext.js
     } catch (err) {
       let userFriendlyError = "Failed to log in with Google. Please try again.";
-      if (err.code === "auth/popup-closed-by-user") {
-        userFriendlyError = "Google sign-in popup closed. Please try again.";
-      } else if (err.code === "auth/too-many-requests") {
+      if (err.code === "auth/too-many-requests") {
         userFriendlyError = "Too many attempts. Please try again later.";
       } else if (err.code === "auth/network-request-failed") {
         userFriendlyError = "Network error. Please check your connection and try again.";
-      } else if (err.code === "auth/popup-blocked") {
-        userFriendlyError = "Popup blocked by browser. Please allow popups and try again.";
       }
       setError(userFriendlyError);
       if (analytics) {
@@ -473,10 +454,11 @@ function LoginPage() {
             />
             <Link
               component={RouterLink}
-              to="/ forgot-password"
+              to="/forgot-password"
               sx={{ fontFamily: "'Poppins', sans-serif'", textDecoration: "none" }}
               onClick={handleForgotPasswordClick}
               aria-label="Forgot password"
+              aria-describedby={error ? "login-error" : undefined}
             >
               Forgot Password?
             </Link>
@@ -506,6 +488,7 @@ function LoginPage() {
               sx={{ textDecoration: "none" }}
               onClick={handleSignupClick}
               aria-label="Sign up"
+              aria-describedby={error ? "login-error" : undefined}
             >
               Sign Up
             </Link>

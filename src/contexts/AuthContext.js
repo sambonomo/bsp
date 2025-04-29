@@ -64,8 +64,11 @@ export function AuthProvider({ children }) {
   const auth = getAuthService();
   const db = getDb();
 
+  // ✅ Define isMobile at the top-level of AuthProvider:
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
   // Log version to confirm file update
-  console.log("AuthContext.js - Version: 2025-04-29 - isMobile fix applied");
+  console.log("AuthContext.js - Version: 2025-04-29-v4 - isMobile fix applied");
 
   // Initialize analytics
   useEffect(() => {

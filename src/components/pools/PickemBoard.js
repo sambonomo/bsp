@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
-import { getDb, getAnalyticsService } from "../../firebase/config"; // Updated imports
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { getDb, getAnalyticsService } from "../../firebase/config";
 import {
   collection,
   query,
   orderBy,
   onSnapshot,
   doc,
-  updateDoc,
   runTransaction,
 } from "firebase/firestore";
 import { useAuth } from "../../contexts/AuthContext";
@@ -48,11 +47,7 @@ const StyledPaper = styled(Paper)(({ theme }) => ({
   },
 }));
 
-const StyledButton = styled(Button)(({ theme, isSelected }) => ({
-  backgroundColor: isSelected
-    ? theme.palette.warning.light
-    : theme.palette.grey[300],
-  color: isSelected ? theme.palette.text.primary : theme.palette.text.secondary,
+const StyledButton = styled(Button)(({ theme }) => ({
   fontFamily: "'Poppins', sans-serif",
   fontWeight: 500,
   padding: theme.spacing(1, 2),
@@ -61,9 +56,6 @@ const StyledButton = styled(Button)(({ theme, isSelected }) => ({
     easing: theme.transitions.easing.easeInOut,
   }),
   "&:hover": {
-    backgroundColor: isSelected
-      ? theme.palette.warning.main
-      : theme.palette.grey[400],
     transform: "scale(1.05)",
   },
   "&:focus": {
@@ -78,13 +70,13 @@ const StyledButton = styled(Button)(({ theme, isSelected }) => ({
 
 function PickemBoard({ poolId }) {
   const { user, authLoading } = useAuth();
-  const { mode } = useThemeContext();
+  const { theme } = useThemeContext(); // Removed unused 'mode'
   const [matchups, setMatchups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [analytics, setAnalytics] = useState(null); // State for analytics
-  const hasLoggedBoardLoad = useRef(false); // Track if board load has been logged
-  const db = getDb(); // Updated to use accessor
+  const [analytics, setAnalytics] = useState(null);
+  const hasLoggedBoardLoad = useRef(false);
+  const db = getDb();
 
   // Initialize analytics
   useEffect(() => {
@@ -93,7 +85,7 @@ function PickemBoard({ poolId }) {
   }, []);
 
   // Retry logic for Firebase operations
-  const withRetry = async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
+  const withRetry = useCallback(async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await callback();
@@ -111,12 +103,12 @@ function PickemBoard({ poolId }) {
         if (attempt === maxRetries) {
           throw error;
         }
-        const delay = Math.pow(2, attempt - 1) * retryDelayBase; // Exponential backoff: 1s, 2s, 4s
+        const delay = Math.pow(2, attempt - 1) * retryDelayBase;
         console.log(`${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
-  };
+  }, [analytics, user?.uid]);
 
   useEffect(() => {
     if (!poolId) return;
@@ -153,13 +145,19 @@ function PickemBoard({ poolId }) {
           },
           (err) => {
             console.error("PickemBoard - Error fetching matchups:", err);
-            setError(err.message || "Failed to load matchups.");
+            let userFriendlyError = "Failed to load matchups.";
+            if (err.code === "permission-denied") {
+              userFriendlyError = "You do not have permission to view matchups for this pool.";
+            } else if (err.code === "unavailable") {
+              userFriendlyError = "Firestore is currently unavailable. Please try again later.";
+            }
+            setError(userFriendlyError);
             setLoading(false);
             if (analytics) {
               logEvent(analytics, "fetch_matchups_failed", {
                 poolId,
                 userId: user?.uid || "anonymous",
-                error_message: err.message || "Unknown error",
+                error_message: userFriendlyError,
                 timestamp: new Date().toISOString(),
               });
               console.log("PickemBoard - Fetch matchups failure logged to Firebase Analytics");
@@ -177,7 +175,10 @@ function PickemBoard({ poolId }) {
     };
 
     fetchMatchups();
-  }, [poolId, user?.uid, analytics]); // Added analytics
+
+    // Reset logging flags when poolId or user changes
+    hasLoggedBoardLoad.current = false;
+  }, [poolId, user?.uid, analytics, db, withRetry]); // Added db and withRetry to dependencies
 
   // Hide if auth state is loading or user is not authenticated
   if (authLoading || !user) {
@@ -203,7 +204,7 @@ function PickemBoard({ poolId }) {
   if (matchups.length === 0) {
     return (
       <Typography sx={{ fontFamily: "'Poppins', sans-serif'", textAlign: "center" }}>
-        No matchups added yet.
+        No matchups added yet. Please ask your pool commissioner to add matchups.
       </Typography>
     );
   }
@@ -241,9 +242,11 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [pendingPick, setPendingPick] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [analytics, setAnalytics] = useState(null); // State for analytics
-  const hasLoggedPick = useRef(false); // Track if pick has been logged
-  const db = getDb(); // Updated to use accessor
+  const [analytics, setAnalytics] = useState(null);
+  const hasLoggedPick = useRef(false);
+  const hasLoggedPickChangeConfirmed = useRef(false);
+  const hasLoggedPickChangeCanceled = useRef(false);
+  const db = getDb();
 
   // Initialize analytics
   useEffect(() => {
@@ -252,7 +255,7 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
   }, []);
 
   // Retry logic for Firebase operations
-  const withRetry = async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
+  const withRetry = useCallback(async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await callback();
@@ -270,12 +273,12 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
         if (attempt === maxRetries) {
           throw error;
         }
-        const delay = Math.pow(2, attempt - 1) * retryDelayBase; // Exponential backoff: 1s, 2s, 4s
+        const delay = Math.pow(2, attempt - 1) * retryDelayBase;
         console.log(`${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
-  };
+  }, [analytics, currentUserId]);
 
   useEffect(() => {
     if (matchup.picks && matchup.picks[currentUserId]) {
@@ -283,7 +286,9 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
     } else {
       setUserPick("");
     }
-    hasLoggedPick.current = false; // Reset on matchup change
+    hasLoggedPick.current = false;
+    hasLoggedPickChangeConfirmed.current = false;
+    hasLoggedPickChangeCanceled.current = false;
   }, [matchup, currentUserId]);
 
   // Check if the matchup has started
@@ -385,7 +390,7 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
   const handleConfirmPickChange = () => {
     if (pendingPick) {
       savePick(pendingPick);
-      if (analytics) {
+      if (analytics && !hasLoggedPickChangeConfirmed.current) {
         logEvent(analytics, "pickem_pick_change_confirmed", {
           poolId,
           matchupId: matchup.id,
@@ -395,6 +400,7 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
           timestamp: new Date().toISOString(),
         });
         console.log("MatchupItem - Pick change confirmed logged to Firebase Analytics");
+        hasLoggedPickChangeConfirmed.current = true;
       }
     }
   };
@@ -402,7 +408,7 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
   const handleCancelPickChange = () => {
     setConfirmDialogOpen(false);
     setPendingPick(null);
-    if (analytics) {
+    if (analytics && !hasLoggedPickChangeCanceled.current) {
       logEvent(analytics, "pickem_pick_change_canceled", {
         poolId,
         matchupId: matchup.id,
@@ -412,6 +418,7 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
         timestamp: new Date().toISOString(),
       });
       console.log("MatchupItem - Pick change canceled logged to Firebase Analytics");
+      hasLoggedPickChangeCanceled.current = true;
     }
   };
 
@@ -453,7 +460,13 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
         <Box sx={{ mt: 1, display: "flex", gap: 2 }}>
           <StyledButton
             variant="contained"
-            isSelected={userPick === "away"}
+            sx={{
+              backgroundColor: userPick === "away" ? (theme) => theme.palette.warning.light : (theme) => theme.palette.grey[300],
+              color: userPick === "away" ? (theme) => theme.palette.text.primary : (theme) => theme.palette.text.secondary,
+              "&:hover": {
+                backgroundColor: userPick === "away" ? (theme) => theme.palette.warning.main : (theme) => theme.palette.grey[400],
+              },
+            }}
             onClick={() => handlePick("away")}
             disabled={hasStarted || saving}
             aria-label={`Pick ${matchup.awayTeam} to win`}
@@ -464,7 +477,13 @@ function MatchupItem({ poolId, matchup, currentUserId }) {
 
           <StyledButton
             variant="contained"
-            isSelected={userPick === "home"}
+            sx={{
+              backgroundColor: userPick === "home" ? (theme) => theme.palette.warning.light : (theme) => theme.palette.grey[300],
+              color: userPick === "home" ? (theme) => theme.palette.text.primary : (theme) => theme.palette.text.secondary,
+              "&:hover": {
+                backgroundColor: userPick === "home" ? (theme) => theme.palette.warning.main : (theme) => theme.palette.grey[400],
+              },
+            }}
             onClick={() => handlePick("home")}
             disabled={hasStarted || saving}
             aria-label={`Pick ${matchup.homeTeam} to win`}

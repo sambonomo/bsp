@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useParams } from "react-router-dom";
-import { doc, onSnapshot, collection, getDocs, getDoc } from "firebase/firestore"; // Added getDoc import
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useParams, Link } from "react-router-dom";
+import { doc, onSnapshot, collection, getDocs, getDoc } from "firebase/firestore";
 import { getDb, getAnalyticsService } from "../../firebase/config";
 import { useAuth } from "../../contexts/AuthContext";
 import { useThemeContext } from "../../contexts/ThemeContext";
@@ -11,6 +11,7 @@ import { motion } from "framer-motion";
 import SquaresGrid from "./SquaresGrid";
 import StripCardList from "./StripCardList";
 import PickemBoard from "./PickemBoard";
+import SurvivorBoard from "./SurvivorBoard";
 import { formatCurrency } from "../../utils/helpers";
 
 // MUI imports
@@ -24,8 +25,13 @@ import {
   Alert,
   Snackbar,
   styled,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import SettingsIcon from "@mui/icons-material/Settings";
 
 // Utility function to log analytics events with deduplication
 const logAnalyticsEvent = (analytics, eventName, params, hasLoggedRef) => {
@@ -88,7 +94,9 @@ function PoolDashboard() {
   const [successMessage, setSuccessMessage] = useState("");
   const [participants, setParticipants] = useState({});
   const [analytics, setAnalytics] = useState(null);
+  const [sortBy, setSortBy] = useState("overall"); // State for sorting leaderboard
   const hasLoggedDashboardLoad = useRef(false);
+  const hasLoggedSortChange = useRef(false);
   const retryCount = useRef(0);
   const maxRetries = 5;
   const retryDelayBase = 2000; // 2 seconds
@@ -115,8 +123,8 @@ function PoolDashboard() {
     });
   }, [poolData, globalTheme]);
 
-  // Retry logic for Firestore operations
-  const withRetry = (operation, callback, maxRetries = 5, retryDelayBase = 2000) => {
+  // Retry logic for Firebase operations
+  const withRetry = useCallback((operation, callback, maxRetries = 5, retryDelayBase = 2000) => {
     return new Promise((resolve, reject) => {
       let attempt = 0;
 
@@ -147,10 +155,21 @@ function PoolDashboard() {
 
       tryOperation();
     });
-  };
+  }, [analytics, user?.uid]);
+
+  // Reset sortBy when pool format changes
+  useEffect(() => {
+    if (poolData) {
+      // Reset sortBy to a default value that matches the pool format
+      if (["squares", "strip_cards", "pickem", "survivor"].includes(poolData.format)) {
+        setSortBy("overall");
+      } else {
+        setSortBy(""); // Reset to empty if format doesn't support sorting
+      }
+    }
+  }, [poolData]); // Added poolData to dependencies
 
   // Fetch pool data with real-time updates and retry logic
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!poolId) {
       console.error("PoolDashboard - Missing poolId:", poolId);
@@ -244,10 +263,9 @@ function PoolDashboard() {
 
     // Reset dashboard load tracking when poolId changes
     hasLoggedDashboardLoad.current = false;
-  }, [poolId, user?.uid, analytics]);
+  }, [poolId, user?.uid, analytics, db, loading, withRetry]); // Added db, loading, and withRetry to dependencies
 
   // Fetch participant data for display names in rankings
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!poolId || !poolData) return;
 
@@ -257,13 +275,22 @@ function PoolDashboard() {
         const participantsSnapshot = await getDocs(participantsRef);
         const participantsData = {};
         participantsSnapshot.forEach((doc) => {
-          participantsData[doc.id] = doc.data().displayName || `User (${doc.id.slice(0, 8)})`;
+          const data = doc.data();
+          participantsData[doc.id] = {
+            displayName: data.displayName || `User (${doc.id.slice(0, 8)})`,
+            picks: data.picks || {}, // For Pick'em and Survivor
+            status: data.status || "active", // For Survivor
+            weeksSurvived: data.weeksSurvived || 0, // For Survivor
+          };
         });
         // Also fetch display names from membersMeta if available
         if (poolData.membersMeta) {
           Object.entries(poolData.membersMeta).forEach(([userId, meta]) => {
             if (meta.displayName) {
-              participantsData[userId] = meta.displayName;
+              participantsData[userId] = {
+                ...participantsData[userId],
+                displayName: meta.displayName,
+              };
             }
           });
         }
@@ -272,9 +299,15 @@ function PoolDashboard() {
           const userDocRef = doc(db, "users", poolData.commissionerId);
           const userDoc = await getDoc(userDocRef);
           if (userDoc.exists() && userDoc.data().displayName) {
-            participantsData[poolData.commissionerId] = userDoc.data().displayName;
+            participantsData[poolData.commissionerId] = {
+              ...participantsData[poolData.commissionerId],
+              displayName: userDoc.data().displayName,
+            };
           } else if (poolData.membersMeta && poolData.membersMeta[poolData.commissionerId]?.displayName) {
-            participantsData[poolData.commissionerId] = poolData.membersMeta[poolData.commissionerId].displayName;
+            participantsData[poolData.commissionerId] = {
+              ...participantsData[poolData.commissionerId],
+              displayName: poolData.membersMeta[poolData.commissionerId].displayName,
+            };
           }
         }
         setParticipants(participantsData);
@@ -294,7 +327,7 @@ function PoolDashboard() {
     };
 
     fetchParticipants();
-  }, [poolId, poolData, user?.uid, analytics]);
+  }, [poolId, poolData, user?.uid, analytics, db]); // Added db to dependencies
 
   // Handle manual refresh
   const handleRefresh = () => {
@@ -312,88 +345,21 @@ function PoolDashboard() {
     }
   };
 
-  // Calculate member rankings (e.g., based on wins or claimed items)
-  const rankings = useMemo(() => {
-    if (!poolData) return [];
-
-    const rankings = [];
-    const memberIds = poolData?.memberIds || [];
-    const offlineUsers = poolData?.offlineUsers || [];
-    const squares = poolData?.format === "squares" ? (poolData?.squares || {}) : {};
-    const strips = poolData?.format === "strip_cards" ? (poolData?.strips || {}) : {};
-
-    const getUserDisplayName = (userId) => {
-      if (userId.startsWith("offline_")) {
-        const offlineUser = offlineUsers.find((user) => user.id === userId);
-        return offlineUser ? offlineUser.name : `Offline User (${userId.slice(8, 12)})`;
-      }
-      // Prefer displayName from participants subcollection
-      if (participants[userId]) {
-        return participants[userId];
-      }
-      // Fallback to membersMeta if available
-      if (poolData.membersMeta && poolData.membersMeta[userId] && poolData.membersMeta[userId].displayName) {
-        return poolData.membersMeta[userId].displayName;
-      }
-      // Fallback to userId if no display name is found
-      return `User (${userId.slice(0, 8)})`;
-    };
-
-    console.log("PoolDashboard - Calculating rankings with squares:", squares);
-    console.log("PoolDashboard - Calculating rankings with strips:", strips);
-    console.log("PoolDashboard - Participants map:", participants);
-    console.log("PoolDashboard - MembersMeta:", poolData.membersMeta);
-
-    if (poolData?.format === "squares") {
-      const winners = poolData.winners || {};
-      memberIds.forEach((uid) => {
-        let wins = 0;
-        Object.values(squares).forEach((square) => {
-          if (square.userId === uid) {
-            const squareNumber = square.row * 10 + square.col + 1;
-            const scorePeriods = ["q1", "q2", "q3", "final"];
-            scorePeriods.forEach((period) => {
-              if (winners[period] === squareNumber) {
-                wins += 1;
-              }
-            });
-          }
-        });
-        rankings.push({ userId: uid, displayName: getUserDisplayName(uid), wins });
-      });
-    } else if (poolData?.format === "strip_cards") {
-      memberIds.forEach((uid) => {
-        let claimed = 0;
-        Object.values(strips).forEach((strip) => {
-          if (strip.userId === uid) {
-            claimed += 1;
-          }
-        });
-        rankings.push({ userId: uid, displayName: getUserDisplayName(uid), claimed });
-      });
+  // Define getUserDisplayName as a function to avoid initialization issues
+  const getUserDisplayName = (userId) => {
+    if (!poolData || !participants) return userId ? `User (${userId.slice(0, 8)})` : "Unknown User";
+    if (userId && userId.startsWith("offline_")) {
+      const offlineUser = (poolData.offlineUsers || []).find((user) => user.id === userId);
+      return offlineUser ? offlineUser.name : `Offline User (${userId.slice(8, 12)})`;
     }
-
-    // Sort rankings
-    if (poolData?.format === "squares") {
-      rankings.sort((a, b) => b.wins - a.wins);
-    } else if (poolData?.format === "strip_cards") {
-      rankings.sort((a, b) => b.claimed - a.claimed);
+    if (userId && participants[userId]?.displayName) {
+      return participants[userId].displayName;
     }
-
-    console.log("PoolDashboard - Calculated rankings:", rankings);
-    if (analytics) {
-      logAnalyticsEvent(analytics, "pool_dashboard_rankings_calculated", {
-        poolId,
-        userId: user?.uid || "anonymous",
-        format: poolData?.format,
-        rankingCount: rankings.length,
-        timestamp: new Date().toISOString(),
-      }, new RefObject(true));
-      console.log("PoolDashboard - Rankings calculation logged to Firebase Analytics");
+    if (userId && poolData.membersMeta && poolData.membersMeta[userId] && poolData.membersMeta[userId].displayName) {
+      return poolData.membersMeta[userId].displayName;
     }
-
-    return rankings;
-  }, [poolData, analytics, user?.uid, poolId, participants]);
+    return userId ? `User (${userId.slice(0, 8)})` : "Unknown User";
+  };
 
   // Calculate payouts for display
   const payouts = useMemo(() => {
@@ -407,6 +373,260 @@ function PoolDashboard() {
       final: (totalPotValue * structure.final).toFixed(2),
     };
   }, [poolData]);
+
+  // Fetch matchups for Pick'em scoring
+  const [matchups, setMatchups] = useState([]);
+  useEffect(() => {
+    if (!poolId || !poolData || poolData.format !== "pickem") return;
+
+    const fetchMatchups = async () => {
+      try {
+        const matchupsRef = collection(db, "pools", poolId, "matchups");
+        const matchupsSnapshot = await getDocs(matchupsRef);
+        const matchupsData = matchupsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setMatchups(matchupsData);
+        console.log("PoolDashboard - Fetched matchups for Pick'em scoring:", matchupsData);
+      } catch (err) {
+        console.error("PoolDashboard - Error fetching matchups:", err);
+        if (analytics) {
+          logAnalyticsEvent(analytics, "fetch_matchups_failed", {
+            poolId,
+            userId: user?.uid || "anonymous",
+            error_message: err.message || "Unknown error",
+            timestamp: new Date().toISOString(),
+          }, new RefObject(true));
+          console.log("PoolDashboard - Fetch matchups failure logged to Firebase Analytics");
+        }
+      }
+    };
+
+    fetchMatchups();
+  }, [poolId, poolData, user?.uid, analytics, db]); // Added db to dependencies
+
+  // Calculate rankings (including per-period rankings for Squares, and actual data for Pick'em and Survivor)
+  const rankingsData = useMemo(() => {
+    if (!poolData) return { overall: [], byPeriod: {}, stripClaims: [], pickemResults: [], survivorResults: [] };
+
+    const memberIds = poolData?.memberIds || [];
+    const squares = poolData?.format === "squares" ? (poolData?.squares || {}) : {};
+    const strips = poolData?.format === "strip_cards" ? (poolData?.strips || {}) : {};
+
+    console.log("PoolDashboard - Calculating rankings with squares:", squares);
+    console.log("PoolDashboard - Calculating rankings with strips:", strips);
+    console.log("PoolDashboard - Participants map:", participants);
+    console.log("PoolDashboard - MembersMeta:", poolData.membersMeta);
+
+    const overallRankings = [];
+    const byPeriodRankings = { q1: [], q2: [], q3: [], final: [] }; // For Squares
+    const stripClaims = []; // For Strip Cards
+    const pickemResults = []; // For Pick'em
+    const survivorResults = []; // For Survivor
+
+    // Squares Pool Rankings
+    if (poolData?.format === "squares") {
+      const winners = poolData.winners || {};
+      const totalPot = parseFloat(poolData.totalPot || 0);
+      const payoutStructure = poolData.payoutStructure || { q1: 0.2, q2: 0.2, q3: 0.2, final: 0.4 };
+      const payouts = {
+        q1: totalPot * payoutStructure.q1,
+        q2: totalPot * payoutStructure.q2,
+        q3: totalPot * payoutStructure.q3,
+        final: totalPot * payoutStructure.final,
+      };
+
+      // Calculate wins and winnings per user
+      const userWins = {};
+      const userWinnings = { q1: {}, q2: {}, q3: {}, final: {} };
+      memberIds.forEach((uid) => {
+        userWins[uid] = { overall: 0 };
+        Object.values(squares).forEach((square) => {
+          if (square.userId === uid) {
+            const squareNumber = square.row * 10 + square.col + 1;
+            const scorePeriods = ["q1", "q2", "q3", "final"];
+            scorePeriods.forEach((period) => {
+              if (winners[period] === squareNumber) {
+                userWins[uid].overall = (userWins[uid].overall || 0) + 1;
+                userWinnings[period][uid] = (userWinnings[period][uid] || 0) + (payouts[period] || 0);
+              }
+            });
+          }
+        });
+      });
+
+      // Overall rankings
+      memberIds.forEach((uid) => {
+        overallRankings.push({
+          userId: uid,
+          displayName: getUserDisplayName(uid),
+          wins: userWins[uid].overall,
+        });
+      });
+      overallRankings.sort((a, b) => b.wins - a.wins);
+
+      // Per-period rankings
+      ["q1", "q2", "q3", "final"].forEach((period) => {
+        const periodRankings = [];
+        memberIds.forEach((uid) => {
+          if (userWinnings[period][uid]) {
+            periodRankings.push({
+              userId: uid,
+              displayName: getUserDisplayName(uid),
+              winnings: userWinnings[period][uid],
+            });
+          }
+        });
+        periodRankings.sort((a, b) => b.winnings - a.winnings);
+        byPeriodRankings[period] = periodRankings;
+      });
+    }
+
+    // Strip Cards Rankings
+    else if (poolData?.format === "strip_cards") {
+      memberIds.forEach((uid) => {
+        let claimed = 0;
+        Object.values(strips).forEach((strip) => {
+          if (strip.userId === uid) {
+            claimed += 1;
+            stripClaims.push({
+              userId: uid,
+              displayName: getUserDisplayName(uid),
+              stripNumber: strip.number,
+              claimedAt: strip.claimedAt,
+            });
+          }
+        });
+        overallRankings.push({
+          userId: uid,
+          displayName: getUserDisplayName(uid),
+          claimed,
+        });
+      });
+      overallRankings.sort((a, b) => b.claimed - a.claimed);
+      stripClaims.sort((a, b) => (b.claimedAt?.toDate?.() || 0) - (a.claimedAt?.toDate?.() || 0));
+    }
+
+    // Pick'em Rankings (Actual scoring)
+    else if (poolData?.format === "pickem") {
+      memberIds.forEach((uid) => {
+        let correctPicks = 0;
+        // Calculate correct picks based on matchups
+        matchups.forEach((matchup) => {
+          const userPick = participants[uid]?.picks?.[matchup.id];
+          const actualWinner = matchup.winner; // Assumes winner field exists (e.g., "home" or "away")
+          if (userPick && actualWinner && userPick === actualWinner) {
+            correctPicks += 1;
+          }
+        });
+        pickemResults.push({
+          userId: uid,
+          displayName: getUserDisplayName(uid),
+          correctPicks,
+        });
+      });
+      overallRankings.push(...pickemResults);
+      overallRankings.sort((a, b) => b.correctPicks - a.correctPicks);
+    }
+
+    // Survivor Rankings (Actual data from participants subcollection)
+    else if (poolData?.format === "survivor") {
+      memberIds.forEach((uid) => {
+        const participant = participants[uid] || {};
+        survivorResults.push({
+          userId: uid,
+          displayName: getUserDisplayName(uid),
+          status: participant.status || "active",
+          weeksSurvived: participant.weeksSurvived || 0,
+        });
+      });
+      survivorResults.sort((a, b) => {
+        // Sort by status (active first) and then by weeks survived (descending)
+        if (a.status === b.status) {
+          return b.weeksSurvived - a.weeksSurvived;
+        }
+        return a.status === "active" ? -1 : 1;
+      });
+      overallRankings.push(...survivorResults);
+    }
+
+    console.log("PoolDashboard - Calculated rankings:", overallRankings);
+    console.log("PoolDashboard - Calculated by-period rankings:", byPeriodRankings);
+    console.log("PoolDashboard - Calculated strip claims:", stripClaims);
+    console.log("PoolDashboard - Calculated pickem results:", pickemResults);
+    console.log("PoolDashboard - Calculated survivor results:", survivorResults);
+    if (analytics) {
+      logAnalyticsEvent(analytics, "pool_dashboard_rankings_calculated", {
+        poolId,
+        userId: user?.uid || "anonymous",
+        format: poolData?.format,
+        rankingCount: overallRankings.length,
+        timestamp: new Date().toISOString(),
+      }, new RefObject(true));
+      console.log("PoolDashboard - Rankings calculation logged to Firebase Analytics");
+    }
+
+    return { overall: overallRankings, byPeriod: byPeriodRankings, stripClaims, pickemResults, survivorResults };
+  }, [poolData, analytics, user?.uid, poolId, participants, matchups]);
+
+  // Game results for Squares (which square won each period)
+  const gameResults = useMemo(() => {
+    if (!poolData || poolData.format !== "squares") return [];
+    const winners = poolData.winners || {};
+    const squares = poolData.squares || {};
+    const results = [];
+
+    ["q1", "q2", "q3", "final"].forEach((period) => {
+      const winningSquareNumber = winners[period];
+      if (winningSquareNumber) {
+        const square = Object.values(squares).find(
+          (s) => (s.row * 10 + s.col + 1) === winningSquareNumber
+        );
+        if (square) {
+          const userId = square.userId;
+          const displayName = getUserDisplayName(userId);
+          results.push({
+            period: period.toUpperCase(),
+            squareNumber: winningSquareNumber,
+            winner: displayName,
+            payout: payouts[period],
+          });
+        }
+      }
+    });
+
+    return results;
+  }, [poolData, payouts, getUserDisplayName]); // Added getUserDisplayName to dependencies
+
+  // Select rankings to display based on sortBy
+  const displayedRankings = useMemo(() => {
+    if (!poolData) return [];
+    if (poolData.format === "squares") {
+      if (sortBy === "overall") {
+        return rankingsData.overall;
+      }
+      return rankingsData.byPeriod[sortBy] || [];
+    } else if (poolData.format === "strip_cards" || poolData.format === "pickem" || poolData.format === "survivor") {
+      return rankingsData.overall;
+    }
+    return [];
+  }, [sortBy, rankingsData, poolData]);
+
+  // Handle sort change
+  const handleSortChange = (e) => {
+    setSortBy(e.target.value);
+    if (!hasLoggedSortChange.current && analytics) {
+      logAnalyticsEvent(analytics, "pool_dashboard_sort_changed", {
+        poolId,
+        userId: user?.uid || "anonymous",
+        sortBy: e.target.value,
+        timestamp: new Date().toISOString(),
+      }, new RefObject(true));
+      console.log("PoolDashboard - Sort by changed logged to Firebase Analytics");
+      hasLoggedSortChange.current = true;
+    }
+  };
 
   // Hide if auth state is loading or user is not authenticated
   if (authLoading || !user) {
@@ -459,23 +679,38 @@ function PoolDashboard() {
     );
   }
 
+  const isCommissioner = user.uid === poolData.commissionerId;
+
   return (
     <ThemeProvider theme={customTheme}>
       <DashboardContainer>
         <Fade in timeout={1000}>
           <Box>
             {/* Pool Header */}
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3, flexWrap: "wrap", gap: 1 }}>
               <SectionTitle variant="h4">{poolData.poolName}</SectionTitle>
-              <Button
-                onClick={handleRefresh}
-                sx={{ fontFamily: "'Poppins', sans-serif'", fontSize: { xs: "0.9rem", md: "1rem" } }}
-                startIcon={<RefreshIcon />}
-                aria-label="Refresh pool data"
-                disabled={loading}
-              >
-                Refresh
-              </Button>
+              <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                {isCommissioner && (
+                  <Button
+                    component={Link}
+                    to={`/commissioner-settings/${poolId}`}
+                    sx={{ fontFamily: "'Poppins', sans-serif'", fontSize: { xs: "0.9rem", md: "1rem" } }}
+                    startIcon={<SettingsIcon />}
+                    aria-label="Manage pool settings"
+                  >
+                    Manage Settings
+                  </Button>
+                )}
+                <Button
+                  onClick={handleRefresh}
+                  sx={{ fontFamily: "'Poppins', sans-serif'", fontSize: { xs: "0.9rem", md: "1rem" } }}
+                  startIcon={<RefreshIcon />}
+                  aria-label="Refresh pool data"
+                  disabled={loading}
+                >
+                  Refresh
+                </Button>
+              </Box>
             </Box>
             {poolData.theme?.logoURL && (
               <Box sx={{ mb: 2, textAlign: "center" }}>
@@ -525,6 +760,12 @@ function PoolDashboard() {
                     <PickemBoard poolId={poolId} />
                   </Box>
                 )}
+                {poolData.format === "survivor" && (
+                  <Box sx={{ mb: 3 }}>
+                    <SectionTitle variant="h5">Survivor Pool</SectionTitle>
+                    <SurvivorBoard poolId={poolId} />
+                  </Box>
+                )}
 
                 {/* Current Scores */}
                 {poolData.scores && (
@@ -552,15 +793,137 @@ function PoolDashboard() {
                     )}
                   </InfoCard>
                 )}
+
+                {/* Game Results */}
+                {poolData.format === "squares" && gameResults.length > 0 && (
+                  <InfoCard role="region" aria-label="Game results section">
+                    <SectionTitle variant="h6">Game Results</SectionTitle>
+                    {gameResults.map((result) => (
+                      <Box key={result.period} sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "'Poppins', sans-serif'" }}
+                        >
+                          {result.period}: Square {result.squareNumber} won by {result.winner}
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "'Poppins', sans-serif'", color: mode === "dark" ? "#34d399" : "#16a34a" }}
+                        >
+                          Payout: ${result.payout}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </InfoCard>
+                )}
+                {poolData.format === "strip_cards" && rankingsData.stripClaims.length > 0 && (
+                  <InfoCard role="region" aria-label="Strip card claims section">
+                    <SectionTitle variant="h6">Strip Card Claims</SectionTitle>
+                    {rankingsData.stripClaims.map((claim, index) => (
+                      <Box key={index} sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "'Poppins', sans-serif'" }}
+                        >
+                          Strip #{claim.stripNumber} claimed by {claim.displayName}
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "'Poppins', sans-serif'" }}
+                        >
+                          Claimed on: {claim.claimedAt?.toDate?.().toLocaleString() || "N/A"}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </InfoCard>
+                )}
+                {poolData.format === "pickem" && rankingsData.pickemResults.length > 0 && (
+                  <InfoCard role="region" aria-label="Pick'em results section">
+                    <SectionTitle variant="h6">Pick'em Results</SectionTitle>
+                    {rankingsData.pickemResults.map((result, index) => (
+                      <Box key={index} sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "'Poppins', sans-serif'" }}
+                        >
+                          {result.displayName}: {result.correctPicks} Correct Picks
+                        </Typography>
+                      </Box>
+                    ))}
+                  </InfoCard>
+                )}
+                {poolData.format === "survivor" && rankingsData.survivorResults.length > 0 && (
+                  <InfoCard role="region" aria-label="Survivor results section">
+                    <SectionTitle variant="h6">Survivor Results</SectionTitle>
+                    {rankingsData.survivorResults.map((result, index) => (
+                      <Box key={index} sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "'Poppins', sans-serif'" }}
+                        >
+                          {result.displayName}: {result.status}
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "'Poppins', sans-serif'" }}
+                        >
+                          Weeks Survived: {result.weeksSurvived}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </InfoCard>
+                )}
               </Box>
 
-              {/* Member Rankings Section - Moved Below Grid */}
+              {/* Member Rankings Section */}
               <Box sx={{ maxWidth: "1020px", mx: "auto", width: "100%" }}>
                 <InfoCard role="region" aria-label="Member rankings section">
-                  <SectionTitle variant="h6">Member Rankings</SectionTitle>
-                  {rankings.length > 0 ? (
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+                    <SectionTitle variant="h6">Member Rankings</SectionTitle>
+                    {["squares", "strip_cards", "pickem", "survivor"].includes(poolData.format) && (
+                      <FormControl sx={{ minWidth: 120 }}>
+                        <InputLabel sx={{ fontFamily: "'Poppins', sans-serif'" }} id="sort-rankings-label">Sort By</InputLabel>
+                        <Select
+                          labelId="sort-rankings-label"
+                          value={sortBy}
+                          onChange={handleSortChange}
+                          sx={{ fontFamily: "'Poppins', sans-serif'" }}
+                          aria-label="Sort rankings"
+                          aria-describedby="sort-rankings-label"
+                        >
+                          {poolData.format === "squares" && (
+                            <>
+                              <MenuItem value="overall" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Overall Wins</MenuItem>
+                              <MenuItem value="q1" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Q1 Wins</MenuItem>
+                              <MenuItem value="q2" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Q2 Wins</MenuItem>
+                              <MenuItem value="q3" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Q3 Wins</MenuItem>
+                              <MenuItem value="final" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Final Wins</MenuItem>
+                            </>
+                          )}
+                          {poolData.format === "strip_cards" && (
+                            <>
+                              <MenuItem value="overall" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Claimed Strips</MenuItem>
+                            </>
+                          )}
+                          {poolData.format === "pickem" && (
+                            <>
+                              <MenuItem value="overall" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Overall Correct Picks</MenuItem>
+                              {/* Add week-based sorting when implemented */}
+                            </>
+                          )}
+                          {poolData.format === "survivor" && (
+                            <>
+                              <MenuItem value="overall" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Survival Duration</MenuItem>
+                              {/* Add round-based sorting when implemented */}
+                            </>
+                          )}
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Box>
+                  {displayedRankings.length > 0 ? (
                     <Box role="list" aria-label="Member rankings">
-                      {rankings.map((rank, index) => (
+                      {displayedRankings.map((rank, index) => (
                         <motion.div
                           key={rank.userId}
                           initial={{ opacity: 0, y: 20 }}
@@ -573,9 +936,12 @@ function PoolDashboard() {
                               justifyContent: "space-between",
                               mb: 1,
                               alignItems: "center",
-                              backgroundColor: index === 0 ? (mode === "dark" ? "#ff9500" : "#f97316") : "transparent",
-                              borderRadius: index === 0 ? 1 : 0,
-                              p: index === 0 ? 1 : 0,
+                              backgroundColor: index === 0 ? (mode === "dark" ? "#ff9500" : "#f97316") : 
+                                              index === 1 ? (mode === "dark" ? "#C0C0C0" : "#A9A9A9") : 
+                                              index === 2 ? (mode === "dark" ? "#CD7F32" : "#B87333") : "transparent",
+                              borderRadius: index <= 2 ? 1 : 0,
+                              p: index <= 2 ? 1 : 0,
+                              color: index <= 2 ? "#ffffff" : undefined,
                             }}
                             role="listitem"
                             aria-label={`Rank ${index + 1}: ${rank.displayName}`}
@@ -584,22 +950,27 @@ function PoolDashboard() {
                               variant="body2"
                               sx={{
                                 fontFamily: "'Poppins', sans-serif'",
-                                color: index === 0 ? "#ffffff" : (mode === "dark" ? "#e5e7eb" : "inherit"),
                                 display: "flex",
                                 alignItems: "center",
                                 gap: 1,
                               }}
                             >
-                              {index === 0 && "🏆"} {index + 1}. {rank.displayName}
+                              {index === 0 && "🏆"} 
+                              {index === 1 && "🥈"} 
+                              {index === 2 && "🥉"} 
+                              {index + 1}. {rank.displayName}
                             </Typography>
                             <Typography
                               variant="body2"
                               sx={{
                                 fontFamily: "'Poppins', sans-serif'",
-                                color: index === 0 ? "#ffffff" : (mode === "dark" ? "#e5e7eb" : "inherit"),
                               }}
                             >
-                              {poolData.format === "squares" ? `${rank.wins} Wins` : `${rank.claimed} Claimed`}
+                              {poolData.format === "squares" && sortBy === "overall" ? `${rank.wins} Wins` : 
+                               poolData.format === "squares" ? `$${rank.winnings.toFixed(2)}` :
+                               poolData.format === "strip_cards" ? `${rank.claimed} Claimed` :
+                               poolData.format === "pickem" ? `${rank.correctPicks} Correct Picks` :
+                               poolData.format === "survivor" ? `${rank.weeksSurvived} Weeks Survived (${rank.status})` : "N/A"}
                             </Typography>
                           </Box>
                         </motion.div>
@@ -607,7 +978,7 @@ function PoolDashboard() {
                     </Box>
                   ) : (
                     <Typography variant="body2" sx={{ fontFamily: "'Poppins', sans-serif'" }}>
-                      No rankings available yet.
+                      No rankings available yet for {sortBy === "overall" ? "this pool" : `${sortBy.toUpperCase()} period`}.
                     </Typography>
                   )}
                 </InfoCard>

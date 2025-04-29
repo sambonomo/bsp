@@ -1,12 +1,18 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Public stats collection (e.g., for community stats)
+    match /stats/{docId} {
+      allow read: if true; // Allow public reads
+      allow write: if request.auth != null && request.auth.uid == "admin"; // Restrict writes to admin (optional)
+    }
+
     // Pools collection
     match /pools/{poolId} {
-      // Allow authenticated users to read pools if they are members or commissioner
-      allow read: if request.auth != null && isMemberOrCommissioner(resource.data);
+      // Allow public reads for featured pools, authenticated reads for members/commissioners
+      allow read: if (resource.data.isFeatured == true) || 
+                    (request.auth != null && isMemberOrCommissioner(resource.data));
 
-      // Allow authenticated users to create pools with proper validation
       allow create: if request.auth != null &&
                        request.resource.data.commissionerId == request.auth.uid &&
                        request.resource.data.memberIds is list &&
@@ -14,58 +20,39 @@ service cloud.firestore {
                        request.resource.data.keys().hasAll(['poolName', 'format', 'sport', 'status', 'createdAt']) &&
                        isValidPoolData(request.resource.data);
 
-      // Allow updates by commissioner or users joining open pools, with matchup validation
       allow update: if request.auth != null &&
                        (isCommissioner(resource.data) || canJoinPool(resource.data)) &&
                        request.resource.data.keys().hasAll(['poolName', 'format', 'sport', 'status', 'commissionerId', 'memberIds']) &&
-                       isValidPoolData(request.resource.data) &&
-                       isValidMatchups(request.resource.data);
+                       isValidPoolData(request.resource.data);
 
-      // Allow deletion only by commissioner
       allow delete: if request.auth != null && isCommissioner(resource.data);
 
-      // Explicit rules for matchups subcollection (optional, for future flexibility)
       match /matchups/{matchupId} {
-        // Allow authenticated members or commissioners to read
         allow read: if request.auth != null && isMemberOrCommissioner(get(/databases/$(database)/documents/pools/$(poolId)).data);
-        // Allow commissioners to create and update matchups
         allow create, update: if request.auth != null &&
                                 isCommissioner(get(/databases/$(database)/documents/pools/$(poolId)).data) &&
                                 isValidMatchupData(request.resource.data);
-        // Allow deletion only by commissioner
         allow delete: if request.auth != null && isCommissioner(get(/databases/$(database)/documents/pools/$(poolId)).data);
       }
 
-      // All other subcollections (squares, strips, participants, offlineUsers, chatMessages, etc.)
       match /{document=**} {
-        // Allow authenticated users to read if they are members or commissioner
         allow read: if request.auth != null && isMemberOrCommissioner(get(/databases/$(database)/documents/pools/$(poolId)).data);
-        // Allow commissioner to create and update
         allow create, update: if request.auth != null && isCommissioner(get(/databases/$(database)/documents/pools/$(poolId)).data);
-        // Allow deletion only by commissioner
         allow delete: if request.auth != null && isCommissioner(get(/databases/$(database)/documents/pools/$(poolId)).data);
       }
     }
 
-    // Users collection
     match /users/{userId} {
-      // Allow users to read and update their own data
       allow read, update: if request.auth != null && request.auth.uid == userId;
-      // Allow authenticated users to create their own user document
       allow create: if request.auth != null && request.auth.uid == userId;
     }
 
-    // PlayerPools collection
     match /playerPools/{docId} {
-      // Allow authenticated users to read player pools
       allow read: if request.auth != null;
-      // Allow users to create and update their own player pools
       allow create, update: if request.auth != null && isOwner(docId);
-      // Allow deletion only by the owner
       allow delete: if request.auth != null && isOwner(docId);
     }
 
-    // Helper Functions
     function isCommissioner(poolData) {
       return 'commissionerId' in poolData && poolData.commissionerId == request.auth.uid;
     }
@@ -86,26 +73,14 @@ service cloud.firestore {
       return 'userId' in doc && doc.userId == request.auth.uid;
     }
 
-    // Validate pool data (e.g., string lengths, valid formats)
     function isValidPoolData(data) {
       return data.poolName is string && data.poolName.size() <= 100 &&
-             data.format in ['pickem', 'squares', 'strip_cards', 'custom_pool'] &&
+             data.format in ['pickem', 'squares', 'strip_cards', 'survivor', 'custom_pool'] &&
              data.sport is string && data.sport.size() <= 50 &&
              data.status in ['open', 'locked'] &&
              data.createdAt is timestamp;
     }
 
-    // Validate matchups array in pool document or matchup subcollection document
-    function isValidMatchups(data) {
-      // If ('matchups' in data)
-      if (!('matchups' in data)) {
-        return true;
-      }
-      // Ensure matchups is a list and has reasonable size
-      return data.matchups is list && data.matchups.size() <= 100;
-    }
-
-    // Validate matchup document in subcollection
     function isValidMatchupData(data) {
       return data.keys().hasAll(['gameId', 'homeTeam', 'awayTeam', 'startTime', 'status']) &&
              data.gameId is string && data.gameId.size() <= 50 &&

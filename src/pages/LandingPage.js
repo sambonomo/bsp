@@ -4,7 +4,16 @@ import { useThemeContext } from "../contexts/ThemeContext";
 import { useAuth } from "../contexts/AuthContext";
 import { getAnalyticsService, getDb } from "../firebase/config";
 import { logEvent } from "firebase/analytics";
-import { collection, addDoc, query, where, getDocs, onSnapshot } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  getDoc,
+  onSnapshot,
+  doc,
+} from "firebase/firestore";
 import {
   Box,
   Container,
@@ -181,47 +190,46 @@ function LandingPage() {
       setFeaturedPools(poolsData);
     }, (err) => {
       console.error("Failed to fetch featured pools:", err);
+      setFeaturedPools([]); // Fallback to empty array on error
     });
     return () => unsubscribe();
   }, [db]);
 
-  // Fetch real-time community stats
+  // Fetch real-time community stats from /stats/community
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        // Pools Created
-        const poolsSnapshot = await getDocs(collection(db, "pools"));
-        const poolsCount = poolsSnapshot.size;
+        const statsRef = doc(db, "stats", "community");
+        const statsDoc = await getDoc(statsRef);
+        if (statsDoc.exists()) {
+          const data = statsDoc.data();
+          // Format numbers
+          const formatNumber = (num) => {
+            if (typeof num !== "number") return "0+";
+            if (num >= 1000) return `${Math.floor(num / 1000)},${num % 1000}+`;
+            return `${num}+`;
+          };
 
-        // Users Joined (unique users across all pools' participants)
-        const poolsDocs = poolsSnapshot.docs;
-        const userIds = new Set();
-        for (const poolDoc of poolsDocs) {
-          const participantsSnapshot = await getDocs(collection(db, "pools", poolDoc.id, "participants"));
-          participantsSnapshot.forEach((doc) => {
-            userIds.add(doc.id);
+          setStats({
+            poolsCreated: formatNumber(data.poolsCreated || 0),
+            usersJoined: formatNumber(data.usersJoined || 0),
+            gamesPlayed: formatNumber(data.gamesPlayed || 0),
+          });
+        } else {
+          console.error("Community stats document not found");
+          setStats({
+            poolsCreated: "0+",
+            usersJoined: "0+",
+            gamesPlayed: "0+",
           });
         }
-        const usersCount = userIds.size;
-
-        // Games Played (completed pools)
-        const completedPoolsQuery = query(collection(db, "pools"), where("status", "==", "completed"));
-        const completedPoolsSnapshot = await getDocs(completedPoolsQuery);
-        const gamesPlayedCount = completedPoolsSnapshot.size;
-
-        // Format numbers
-        const formatNumber = (num) => {
-          if (num >= 1000) return `${Math.floor(num / 1000)},${num % 1000}+`;
-          return `${num}+`;
-        };
-
-        setStats({
-          poolsCreated: formatNumber(poolsCount),
-          usersJoined: formatNumber(usersCount),
-          gamesPlayed: formatNumber(gamesPlayedCount),
-        });
       } catch (err) {
         console.error("Failed to fetch community stats:", err);
+        setStats({
+          poolsCreated: "0+",
+          usersJoined: "0+",
+          gamesPlayed: "0+",
+        });
       }
     };
 
