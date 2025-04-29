@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useContext, useMemo, useRef } from "react";
+import React, { createContext, useState, useEffect, useContext, useMemo, useRef, useCallback } from "react";
 import { ThemeContext } from "./ThemeContext";
 import {
   createUserWithEmailAndPassword,
@@ -7,12 +7,14 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   sendPasswordResetEmail,
   reauthenticateWithCredential,
   EmailAuthProvider,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
-import { getAuthService, getDb, getAnalyticsService } from "../firebase/config"; // Updated imports
+import { getAuthService, getDb, getAnalyticsService } from "../firebase/config";
 import { logEvent } from "firebase/analytics";
 import { Box, Typography, CircularProgress, Fade, Alert } from "@mui/material";
 
@@ -45,7 +47,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [analytics, setAnalytics] = useState(null); // State for analytics
+  const [analytics, setAnalytics] = useState(null);
   const [loadingAnnouncement, setLoadingAnnouncement] = useState("Loading authentication state...");
   const { theme: muiTheme } = useContext(ThemeContext);
   const loggedEvents = useRef({
@@ -59,8 +61,11 @@ export function AuthProvider({ children }) {
     addOfflineUserSuccess: false,
   });
   const liveRegionRef = useRef(null);
-  const auth = getAuthService(); // Updated to use accessor
-  const db = getDb(); // Updated to use accessor
+  const auth = getAuthService();
+  const db = getDb();
+
+  // Log version to confirm file update
+  console.log("AuthContext.js - Version: 2025-04-29 - isMobile fix applied");
 
   // Initialize analytics
   useEffect(() => {
@@ -104,7 +109,7 @@ export function AuthProvider({ children }) {
   }, [loadingAnnouncement]);
 
   // Retry logic for Firebase operations
-  const withRetry = async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
+  const withRetry = useCallback(async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         return await callback();
@@ -127,7 +132,7 @@ export function AuthProvider({ children }) {
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
-  };
+  }, [analytics, user?.uid]);
 
   // Initialize auth state with Firebase
   useEffect(() => {
@@ -227,7 +232,65 @@ export function AuthProvider({ children }) {
       unsubscribe();
       clearTimeout(authTimeout);
     };
-  }, []); // Dependencies are correct as is
+  }, [analytics, auth, authLoading, user?.uid]);
+
+  // Handle redirect results for Google sign-in
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result) {
+          const newUser = result.user;
+          const userRef = doc(db, "users", newUser.uid);
+          const snapshot = await withRetry("loginWithGoogleRedirect - getDoc", () => getDoc(userRef));
+
+          if (!snapshot.exists()) {
+            await withRetry("loginWithGoogleRedirect - setDoc (new user)", () =>
+              setDoc(userRef, {
+                email: newUser.email,
+                displayName: newUser.displayName || newUser.email.split("@")[0],
+                subscriptionTier: "Bronze",
+                createdAt: serverTimestamp(),
+                lastLoginAt: serverTimestamp(),
+              }, { merge: true })
+            );
+            console.log("Google Sign-In Redirect - New user doc created:", newUser.uid);
+          } else {
+            await withRetry("loginWithGoogleRedirect - setDoc (existing user)", () =>
+              setDoc(userRef, {
+                lastLoginAt: serverTimestamp(),
+              }, { merge: true })
+            );
+            console.log("Google Sign-In Redirect - User logged in:", newUser.uid);
+          }
+
+          if (!loggedEvents.current.googleLoginSuccess && analytics) {
+            logEvent(analytics, "google_login_success", {
+              userId: newUser.uid,
+              email: newUser.email,
+              method: "redirect",
+              timestamp: new Date().toISOString(),
+            });
+            console.log("AuthProvider - Google login (redirect) logged to Firebase Analytics");
+            loggedEvents.current.googleLoginSuccess = true;
+          }
+        }
+      })
+      .catch((error) => {
+        console.error("Google Sign-In Redirect Error:", error);
+        const message = getFriendlyErrorMessage(error.code, "Google sign-in failed.");
+        setError(message);
+        if (analytics) {
+          logEvent(analytics, "google_login_failure", {
+            userId: user?.uid || "anonymous",
+            error_message: message,
+            error_code: error.code,
+            method: "redirect",
+            timestamp: new Date().toISOString(),
+          });
+          console.log("AuthProvider - Google login (redirect) failure logged to Firebase Analytics");
+        }
+      });
+  }, [analytics, user?.uid]);
 
   const getFriendlyErrorMessage = (errorCode, defaultMessage) => {
     switch (errorCode) {
@@ -243,6 +306,12 @@ export function AuthProvider({ children }) {
         return "Password must be at least 6 characters long.";
       case "auth/too-many-requests":
         return "Too many attempts. Please try again later.";
+      case "auth/popup-blocked":
+        return "Sign-in popup was blocked. Please allow popups and try again.";
+      case "auth/popup-closed-by-user":
+        return "Sign-in popup was closed. Please try again.";
+      case "auth/network-request-failed":
+        return "Network error. Please check your internet connection and try again.";
       case "firestore/unavailable":
         return "Database unavailable. Please try again later.";
       case "firestore/permission-denied":
@@ -254,7 +323,7 @@ export function AuthProvider({ children }) {
     }
   };
 
-  async function signup(email, password, displayName = "") {
+  const signup = useCallback(async (email, password, displayName = "") => {
     try {
       setError(null);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -301,9 +370,9 @@ export function AuthProvider({ children }) {
 
       throw new Error(message);
     }
-  }
+  }, [analytics, user?.uid, auth, db]);
 
-  async function login(email, password) {
+  const login = useCallback(async (email, password) => {
     try {
       setError(null);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
@@ -346,9 +415,9 @@ export function AuthProvider({ children }) {
 
       throw new Error(message);
     }
-  }
+  }, [analytics, user?.uid, auth, db]);
 
-  async function logout() {
+  const logout = useCallback(async () => {
     try {
       setError(null);
       await signOut(auth);
@@ -379,49 +448,55 @@ export function AuthProvider({ children }) {
 
       throw new Error(message);
     }
-  }
+  }, [analytics, user?.uid, auth]);
 
-  async function loginWithGoogle() {
+  const loginWithGoogle = useCallback(async () => {
     const googleProvider = new GoogleAuthProvider();
     try {
       setError(null);
-      const result = await signInWithPopup(auth, googleProvider);
-      const newUser = result.user;
-
-      const userRef = doc(db, "users", newUser.uid);
-      const snapshot = await withRetry("loginWithGoogle - getDoc", () => getDoc(userRef));
-
-      if (!snapshot.exists()) {
-        await withRetry("loginWithGoogle - setDoc (new user)", () =>
-          setDoc(userRef, {
-            email: newUser.email,
-            displayName: newUser.displayName || newUser.email.split("@")[0],
-            subscriptionTier: "Bronze",
-            createdAt: serverTimestamp(),
-            lastLoginAt: serverTimestamp(),
-          }, { merge: true })
-        );
-        console.log("Google Sign-In - New user doc created:", newUser.uid);
+      // Use popup for desktop, redirect for mobile to avoid COOP issues
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        await signInWithRedirect(auth, googleProvider);
+        console.log("Google Sign-In - Initiated redirect");
       } else {
-        await withRetry("loginWithGoogle - setDoc (existing user)", () =>
-          setDoc(userRef, {
-            lastLoginAt: serverTimestamp(),
-          }, { merge: true })
-        );
-        console.log("Google Sign-In - User logged in:", newUser.uid);
-      }
+        const result = await signInWithPopup(auth, googleProvider);
+        const newUser = result.user;
+        const userRef = doc(db, "users", newUser.uid);
+        const snapshot = await withRetry("loginWithGoogle - getDoc", () => getDoc(userRef));
 
-      if (!loggedEvents.current.googleLoginSuccess && analytics) {
-        logEvent(analytics, "google_login_success", {
-          userId: newUser.uid,
-          email: newUser.email,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("AuthProvider - Google login logged to Firebase Analytics");
-        loggedEvents.current.googleLoginSuccess = true;
-      }
+        if (!snapshot.exists()) {
+          await withRetry("loginWithGoogle - setDoc (new user)", () =>
+            setDoc(userRef, {
+              email: newUser.email,
+              displayName: newUser.displayName || newUser.email.split("@")[0],
+              subscriptionTier: "Bronze",
+              createdAt: serverTimestamp(),
+              lastLoginAt: serverTimestamp(),
+            }, { merge: true })
+          );
+          console.log("Google Sign-In - New user doc created:", newUser.uid);
+        } else {
+          await withRetry("loginWithGoogle - setDoc (existing user)", () =>
+            setDoc(userRef, {
+              lastLoginAt: serverTimestamp(),
+            }, { merge: true })
+          );
+          console.log("Google Sign-In - User logged in:", newUser.uid);
+        }
 
-      return newUser;
+        if (!loggedEvents.current.googleLoginSuccess && analytics) {
+          logEvent(analytics, "google_login_success", {
+            userId: newUser.uid,
+            email: newUser.email,
+            method: "popup",
+            timestamp: new Date().toISOString(),
+          });
+          console.log("AuthProvider - Google login logged to Firebase Analytics");
+          loggedEvents.current.googleLoginSuccess = true;
+        }
+        return newUser;
+      }
     } catch (error) {
       console.error("Google Sign-In Error:", error);
       const message = getFriendlyErrorMessage(error.code, "Google sign-in failed.");
@@ -431,6 +506,8 @@ export function AuthProvider({ children }) {
         logEvent(analytics, "google_login_failure", {
           userId: user?.uid || "anonymous",
           error_message: message,
+          error_code: error.code,
+          method: isMobile ? "redirect" : "popup",
           timestamp: new Date().toISOString(),
         });
         console.log("AuthProvider - Google login failure logged to Firebase Analytics");
@@ -438,9 +515,9 @@ export function AuthProvider({ children }) {
 
       throw new Error(message);
     }
-  }
+  }, [analytics, user?.uid, auth, db]);
 
-  async function resetPassword(email) {
+  const resetPassword = useCallback(async (email) => {
     try {
       setError(null);
       await sendPasswordResetEmail(auth, email);
@@ -472,9 +549,9 @@ export function AuthProvider({ children }) {
 
       throw new Error(message);
     }
-  }
+  }, [analytics, auth]);
 
-  async function reauthenticate(email, password) {
+  const reauthenticate = useCallback(async (email, password) => {
     try {
       setError(null);
       if (!auth.currentUser) {
@@ -514,9 +591,9 @@ export function AuthProvider({ children }) {
 
       throw new Error(message);
     }
-  }
+  }, [analytics, user?.uid, auth]);
 
-  async function addOfflineUser(poolId, offlineUserData) {
+  const addOfflineUser = useCallback(async (poolId, offlineUserData) => {
     try {
       setError(null);
       const offlineUsersRef = collection(db, "pools", poolId, "offlineUsers");
@@ -559,11 +636,11 @@ export function AuthProvider({ children }) {
 
       throw new Error(message);
     }
-  }
+  }, [analytics, user?.uid, db]);
 
-  const clearError = () => {
+  const clearError = useCallback(() => {
     setError(null);
-  };
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -579,7 +656,7 @@ export function AuthProvider({ children }) {
       clearError,
       addOfflineUser,
     }),
-    [user, authLoading, error, signup, login, logout, loginWithGoogle, resetPassword, reauthenticate, addOfflineUser] // Added all functions
+    [user, authLoading, error, signup, login, logout, loginWithGoogle, resetPassword, reauthenticate, clearError, addOfflineUser]
   );
 
   return (
