@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useContext, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, CssBaseline, Container, Typography, Alert, CircularProgress, Fade, Button } from "@mui/material";
+import {
+  Box,
+  CssBaseline,
+  Container,
+  Typography,
+  Alert,
+  CircularProgress,
+  Fade,
+  Button,
+} from "@mui/material";
 import { AuthContext } from "./contexts/AuthContext";
 import { SubscriptionContext, SubscriptionProvider } from "./contexts/SubscriptionContext";
 import { ThemeContext, ThemeProvider } from "./contexts/ThemeContext";
@@ -37,7 +46,12 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <Box sx={{ p: 4, textAlign: "center" }}>
-          <Alert severity="error" sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }} role="alert" aria-live="assertive">
+          <Alert
+            severity="error"
+            sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }}
+            role="alert"
+            aria-live="assertive"
+          >
             Something went wrong: {this.state.error?.message || "Unknown error"}
           </Alert>
           <Typography variant="body1" sx={{ fontFamily: "'Poppins', sans-serif'" }}>
@@ -45,7 +59,11 @@ class ErrorBoundary extends React.Component {
             <Box
               component="a"
               href="mailto:support@bonomosportspools.com"
-              sx={{ color: (theme) => theme.palette.primary.main, textDecoration: "none", "&:hover": { textDecoration: "underline" } }}
+              sx={{
+                color: (theme) => theme.palette.primary.main,
+                textDecoration: "none",
+                "&:hover": { textDecoration: "underline" },
+              }}
               aria-label="Contact support via email"
             >
               support@bonomosportspools.com
@@ -74,6 +92,7 @@ function MainApp() {
   const [timeoutReached, setTimeoutReached] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [analytics, setAnalytics] = useState(null);
+
   const maxRetries = 3;
   const hasLoggedAppLoad = useRef(false);
   const hasLoggedAdBanner = useRef(false);
@@ -108,7 +127,7 @@ function MainApp() {
     return () => window.removeEventListener("error", handleError);
   }, [user, analytics]);
 
-  // Log app load event (only once per session)
+  // Log app load event (only once)
   useEffect(() => {
     if (!isLoading && analytics && !hasLoggedAppLoad.current) {
       logEvent(analytics, "app_loaded", {
@@ -122,7 +141,7 @@ function MainApp() {
     }
   }, [isLoading, user?.uid, subscriptionTier, analytics]);
 
-  // Reset analytics logging flags when user changes
+  // Reset analytics logging flags on user change
   useEffect(() => {
     hasLoggedAppLoad.current = false;
     hasLoggedAdBanner.current = false;
@@ -132,7 +151,7 @@ function MainApp() {
     loadStartTime.current = Date.now();
   }, [user?.uid]);
 
-  // Handle loading state with timeout and automatic retry
+  // Handle loading state with timeout and auto-retry
   useEffect(() => {
     if (!authLoading && !subLoading) {
       setIsLoading(false);
@@ -146,9 +165,17 @@ function MainApp() {
     const timeout = setTimeout(() => {
       if (isLoading) {
         setTimeoutReached(true);
-        const failedContext = authLoading && subLoading ? "both auth and subscription" : authLoading ? "auth" : "subscription";
+        const failedContext = authLoading && subLoading
+          ? "both auth and subscription"
+          : authLoading
+          ? "auth"
+          : "subscription";
         const loadDuration = Date.now() - loadStartTime.current;
-        const errorMessage = `Loading pool data timed out after ${timeoutDuration / 1000} seconds (${failedContext} context). Load duration: ${loadDuration / 1000} seconds. Retrying...`;
+        const errorMessage = `Loading pool data timed out after ${
+          timeoutDuration / 1000
+        } seconds (${failedContext} context). Load duration: ${
+          loadDuration / 1000
+        } seconds. Retrying...`;
         setError(errorMessage);
 
         if (analytics && !hasLoggedTimeout.current) {
@@ -206,8 +233,7 @@ function MainApp() {
   }, [authLoading, subLoading, isLoading, user?.uid, retryCount, analytics]);
 
   /**
-   * Handles manual retry of loading contexts when a timeout occurs.
-   * @returns {void}
+   * Manual retry of loading contexts when a timeout occurs.
    */
   const handleRetry = useCallback(() => {
     if (retryCount >= maxRetries) {
@@ -244,9 +270,9 @@ function MainApp() {
     }
 
     window.location.reload();
-  }, [retryCount, user?.uid, analytics]);
+  }, [retryCount, analytics]);
 
-  // Log ad banner display (only once per session)
+  // Log ad banner display
   const showAds = user && subscriptionTier === "Bronze";
   useEffect(() => {
     if (showAds && analytics && !hasLoggedAdBanner.current) {
@@ -279,7 +305,12 @@ function MainApp() {
           aria-label="Loading the application data"
         >
           {error ? (
-            <Alert severity="error" sx={{ fontFamily: "'Poppins', sans-serif'", mb: 2 }} role="alert" aria-live="assertive">
+            <Alert
+              severity="error"
+              sx={{ fontFamily: "'Poppins', sans-serif'", mb: 2 }}
+              role="alert"
+              aria-live="assertive"
+            >
               {error}
               {retryCount < maxRetries ? (
                 <Button
@@ -316,7 +347,10 @@ function MainApp() {
             </Alert>
           ) : (
             <>
-              <CircularProgress sx={{ color: muiTheme.palette.secondary.main, mb: 2 }} aria-label="Loading application data" />
+              <CircularProgress
+                sx={{ color: muiTheme.palette.secondary.main, mb: 2 }}
+                aria-label="Loading application data"
+              />
               <Typography
                 variant="h6"
                 sx={{
@@ -334,7 +368,9 @@ function MainApp() {
                   color: muiTheme.palette.text.secondary,
                 }}
               >
-                {timeoutReached ? "Loading timed out. Retrying..." : "Loading application..."}
+                {timeoutReached
+                  ? "Loading timed out. Retrying..."
+                  : "Loading application..."}
               </Typography>
             </>
           )}

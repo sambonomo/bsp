@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link as RouterLink } from "react-router-dom";
 import { useThemeContext } from "../contexts/ThemeContext";
 import { useAuth } from "../contexts/AuthContext";
 import { getDb, getAnalyticsService } from "../firebase/config";
-import { addDoc, collection, serverTimestamp, doc, setDoc } from "firebase/firestore";
+import {
+  runTransaction,
+  doc,
+  collection,
+  serverTimestamp,
+} from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { logEvent } from "firebase/analytics";
-import { Link as RouterLink } from "react-router-dom";
+
 import {
   Box,
   Container,
@@ -22,11 +27,10 @@ import {
   Grid,
   Fade,
   styled,
-  Tooltip,
   Snackbar,
-  IconButton,
   CircularProgress,
 } from "@mui/material";
+
 import SportsFootballIcon from "@mui/icons-material/SportsFootball";
 import SportsBaseballIcon from "@mui/icons-material/SportsBaseball";
 import SportsBasketballIcon from "@mui/icons-material/SportsBasketball";
@@ -37,8 +41,8 @@ import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import ShareIcon from "@mui/icons-material/Share";
 
-// Removed unused import:
-// import InfoIcon from "@mui/icons-material/Info";
+// Import only validatePoolName now (deadline was removed)
+import { validatePoolName as validatePoolNameFn } from "../utils/validations";
 
 const WizardContainer = styled(Box)(({ theme }) => ({
   background:
@@ -56,20 +60,20 @@ const StyledStepper = styled(Stepper)(({ theme }) => ({
     color: theme.palette.mode === "dark" ? "#B0BEC5" : "#555555",
     fontSize: "1rem",
   },
-  "& .MuiStepLabel-label.Mui-active": {
+  "& .MuiStepLabel-label.Mui.active": {
     color: "#FFD700",
     fontWeight: 600,
   },
-  "& .MuiStepLabel-label.Mui-completed": {
+  "& .MuiStepLabel-label.Mui.completed": {
     color: theme.palette.mode === "dark" ? "#FFFFFF" : "#0B162A",
   },
   "& .MuiStepIcon-root": {
     color: theme.palette.mode === "dark" ? "#3A4B6A" : "#E0E0E0",
   },
-  "& .MuiStepIcon-root.Mui-active": {
+  "& .MuiStepIcon-root.Mui.active": {
     color: "#FFD700",
   },
-  "& .MuiStepIcon-root.Mui-completed": {
+  "& .MuiStepIcon-root.Mui.completed": {
     color: "#FFD700",
   },
 }));
@@ -126,6 +130,7 @@ const StyledButton = styled(Button)(({ theme }) => ({
   },
 }));
 
+// Steps array
 const steps = ["Choose Sport", "Select Format", "Name Pool", "Review & Create", "Finish"];
 
 const SPORTS = [
@@ -147,9 +152,6 @@ const FORMATS = [
   { key: "survivor", name: "Survivor", desc: "Pick one winner weekly, no repeats." },
 ];
 
-/**
- * Main Wizard Content
- */
 function WizardContent({ user, authLoading, mode, location }) {
   const isDarkMode = mode === "dark";
   const navigate = useNavigate();
@@ -158,6 +160,7 @@ function WizardContent({ user, authLoading, mode, location }) {
   const [selectedSport, setSelectedSport] = useState(null);
   const [selectedFormat, setSelectedFormat] = useState(null);
   const [poolName, setPoolName] = useState("");
+
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [creating, setCreating] = useState(false);
@@ -185,26 +188,20 @@ function WizardContent({ user, authLoading, mode, location }) {
     setAnalytics(analyticsInstance);
   }, []);
 
-  // Track page view on mount (only once)
+  // Track page view on mount
   useEffect(() => {
     if (!hasLoggedPageView.current && analytics) {
       logEvent(analytics, "create_pool_wizard_viewed", {
         userId: user?.uid || "anonymous",
         timestamp: new Date().toISOString(),
       });
-      console.log("CreatePoolWizard - Page view logged to Firebase Analytics");
       hasLoggedPageView.current = true;
     }
   }, [user?.uid, analytics]);
 
-  // Handle auth state and preselect sport/format
+  // Handle auth + URL param preselection
   useEffect(() => {
-    console.log("CreatePoolWizard - Current User on Mount:", user);
-
-    if (authLoading) {
-      return;
-    }
-
+    if (authLoading) return;
     if (!user) {
       navigate("/login");
       return;
@@ -225,9 +222,6 @@ function WizardContent({ user, authLoading, mode, location }) {
             sportKey,
             timestamp: new Date().toISOString(),
           });
-          console.log(
-            "CreatePoolWizard - Sport preselection logged to Firebase Analytics"
-          );
           hasLoggedSportPreselected.current = true;
         }
       }
@@ -243,51 +237,15 @@ function WizardContent({ user, authLoading, mode, location }) {
             formatKey,
             timestamp: new Date().toISOString(),
           });
-          console.log(
-            "CreatePoolWizard - Format preselection logged to Firebase Analytics"
-          );
           hasLoggedFormatSelected.current = true;
         }
       }
     }
   }, [authLoading, user, location.search, navigate, analytics]);
 
-  // Retry helper
-  const withRetry = useCallback(
-    async (operation, callback, maxRetries = 3, retryDelayBase = 1000) => {
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          return await callback();
-        } catch (error) {
-          if (analytics) {
-            logEvent(analytics, "firebase_operation_retry", {
-              userId: user?.uid || "anonymous",
-              operation,
-              attempt,
-              error_message: error.message,
-              timestamp: new Date().toISOString(),
-            });
-            console.log(
-              `CreatePoolWizard - ${operation} retry attempt ${attempt} logged to Firebase Analytics`
-            );
-          }
-          if (attempt === maxRetries) {
-            throw error;
-          }
-          const delay = Math.pow(2, attempt - 1) * retryDelayBase;
-          console.log(
-            `${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
-    },
-    [analytics, user]
-  );
-
-  // Sanitizes input
+  // A simple input sanitization
   const sanitizeInput = useCallback((input) => {
-    const sanitized = input
+    return input
       .replace(/<[^>]*>/g, "")
       .replace(/[&<>"'/]/g, (char) => {
         const entities = {
@@ -301,13 +259,6 @@ function WizardContent({ user, authLoading, mode, location }) {
         return entities[char] || char;
       })
       .trim();
-    return sanitized;
-  }, []);
-
-  // Validates pool name
-  const validatePoolName = useCallback((name) => {
-    const regex = /^[a-zA-Z0-9\s.,!?-]+$/;
-    return regex.test(name);
   }, []);
 
   const handleNext = useCallback(() => {
@@ -320,12 +271,11 @@ function WizardContent({ user, authLoading, mode, location }) {
           toStep: newStep,
           timestamp: new Date().toISOString(),
         });
-        console.log("CreatePoolWizard - Step change logged to Firebase Analytics");
         hasLoggedStepChange.current = true;
       }
       return newStep;
     });
-  }, [analytics, user]);
+  }, [analytics]);
 
   const handleBack = useCallback(() => {
     setActiveStep((prev) => {
@@ -337,14 +287,13 @@ function WizardContent({ user, authLoading, mode, location }) {
           toStep: newStep,
           timestamp: new Date().toISOString(),
         });
-        console.log("CreatePoolWizard - Step change logged to Firebase Analytics");
         hasLoggedStepChange.current = true;
       }
       return newStep;
     });
-  }, [analytics, user]);
+  }, [analytics]);
 
-  // Validate step data before moving forward
+  // Validate step data
   const handleNextStepValidation = useCallback(() => {
     setError("");
     if (activeStep === 0 && !selectedSport) {
@@ -360,71 +309,54 @@ function WizardContent({ user, authLoading, mode, location }) {
         setError("Please enter a Pool Name.");
         return;
       }
-      if (!validatePoolName(poolName)) {
-        setError(
-          "Pool Name can only contain letters, numbers, spaces, and basic punctuation (.,!?-)."
-        );
-        return;
-      }
-      if (poolName.length > 100) {
-        setError("Pool Name must be 100 characters or less.");
+      const poolNameErr = validatePoolNameFn(poolName);
+      if (poolNameErr) {
+        setError(poolNameErr);
         return;
       }
     }
     handleNext();
-  }, [activeStep, selectedSport, selectedFormat, poolName, validatePoolName, handleNext]);
+  }, [activeStep, selectedSport, selectedFormat, poolName]);
 
-  // Generate invite code via Cloud Function
+  // Generate a unique invite code
   const generateUniqueInviteCode = useCallback(async () => {
     try {
       const generateInviteCode = httpsCallable(functions, "generateInviteCode");
       const result = await generateInviteCode();
-      const inviteCode = result.data.inviteCode;
+      const code = result.data.inviteCode;
 
       if (analytics) {
         logEvent(analytics, "invite_code_generated", {
           userId: user?.uid || "anonymous",
-          inviteCode,
+          inviteCode: code,
           timestamp: new Date().toISOString(),
         });
-        console.log(
-          "CreatePoolWizard - Invite code generation logged to Firebase Analytics"
-        );
       }
-      return inviteCode;
+      return code;
     } catch (err) {
       throw new Error("Failed to generate invite code: " + err.message);
     }
-  }, [analytics, user?.uid, functions]);
+  }, [analytics, functions, user?.uid]);
 
-  // Create the pool
+  // *** 1) We remove addDoc/setDoc and use runTransaction for atomic writes. ***
   const handleCreatePool = useCallback(async () => {
     if (!user) {
       setError("You must be logged in to create a pool.");
       return;
     }
     if (!selectedSport || !selectedFormat || !poolName.trim()) {
-      setError(
-        "Missing required fields: sport, format, and pool name are required."
-      );
+      setError("Missing required fields: sport, format, and pool name are required.");
       return;
     }
-  
+
     try {
       setCreating(true);
       setError("");
-  
+
       const inviteCode = await generateUniqueInviteCode();
       const sanitizedPoolName = sanitizeInput(poolName);
-  
-      // Validate field lengths
-      if (sanitizedPoolName.length > 100) {
-        throw new Error("Pool Name must be 100 characters or less.");
-      }
-      if (selectedSport.name.length > 50) {
-        throw new Error("Sport name must be 50 characters or less.");
-      }
-  
+
+      // Basic pool data
       const newPoolData = {
         poolName: sanitizedPoolName,
         format: selectedFormat.key,
@@ -433,85 +365,58 @@ function WizardContent({ user, authLoading, mode, location }) {
         createdAt: serverTimestamp(),
         commissionerId: user.uid,
         memberIds: [user.uid],
-        isFeatured: false, // Added default value
-        // Additional optional data
         sportKey: selectedSport.key,
         formatName: selectedFormat.name,
         inviteCode,
       };
-      console.log("CreatePoolWizard - Creating Pool with Data:", newPoolData);
-  
-      const docRef = await withRetry("Create Pool", () =>
-        addDoc(collection(db, "pools"), newPoolData)
-      );
-      console.log("CreatePoolWizard - Pool Created with ID:", docRef.id);
-  
-      // Initialize format-specific data
-      if (selectedFormat.key === "strip_cards") {
-        const strips = [];
-        for (let i = 1; i <= 10; i++) {
-          strips.push({
-            number: i,
-            userId: null, // Not claimed yet
-            claimedAt: null,
-          });
-        }
-        await withRetry("Initialize Strips", () =>
-          setDoc(doc(db, "pools", docRef.id), { strips }, { merge: true })
-        );
-        console.log(
-          "CreatePoolWizard - Initialized 10 strips for Strip Cards pool"
-        );
-        if (analytics && !hasLoggedStripsInitialized.current) {
-          logEvent(analytics, "strips_initialized", {
-            userId: user.uid,
-            poolId: docRef.id,
-            stripCount: 10,
-            timestamp: new Date().toISOString(),
-          });
-          console.log(
-            "CreatePoolWizard - Strips initialization logged to Firebase Analytics"
-          );
-          hasLoggedStripsInitialized.current = true;
-        }
-      } else if (selectedFormat.key === "squares") {
-        const squares = {};
-        for (let row = 0; row < 10; row++) {
-          for (let col = 0; col < 10; col++) {
-            const squareId = `square-${row * 10 + col + 1}`;
-            squares[squareId] = {
-              row,
-              col,
-              userId: null,
-              claimedAt: null,
-            };
+      console.log("CreatePoolWizard - Creating Pool (Transaction) with:", newPoolData);
+
+      // *** 2) Start transaction. Create docRef manually. ***
+      const docRef = doc(collection(db, "pools"));
+
+      await runTransaction(db, async (transaction) => {
+        // Step A: Create the main doc
+        transaction.set(docRef, newPoolData);
+
+        // Step B: If format is strip_cards, add strips in the same transaction
+        if (selectedFormat.key === "strip_cards") {
+          const strips = [];
+          for (let i = 1; i <= 10; i++) {
+            strips.push({ number: i, userId: null, claimedAt: null });
           }
+          // transaction.update merges these fields
+          transaction.update(docRef, { strips });
         }
-        await withRetry("Initialize Squares", () =>
-          setDoc(doc(db, "pools", docRef.id), { squares }, { merge: true })
-        );
-        console.log(
-          "CreatePoolWizard - Initialized 100 squares for Squares pool"
-        );
-        if (analytics && !hasLoggedSquaresInitialized.current) {
-          logEvent(analytics, "squares_initialized", {
-            userId: user.uid,
-            poolId: docRef.id,
-            squareCount: 100,
-            timestamp: new Date().toISOString(),
-          });
-          console.log(
-            "CreatePoolWizard - Squares initialization logged to Firebase Analytics"
-          );
-          hasLoggedSquaresInitialized.current = true;
+
+        // Step C: If format is squares, add squares in the same transaction
+        if (selectedFormat.key === "squares") {
+          const squares = {};
+          for (let row = 0; row < 10; row++) {
+            for (let col = 0; col < 10; col++) {
+              const squareId = `square-${row * 10 + col + 1}`;
+              squares[squareId] = {
+                row,
+                col,
+                userId: null,
+                claimedAt: null,
+              };
+            }
+          }
+          transaction.update(docRef, { squares });
         }
-      }
-  
+
+        // If the transaction completes, docRef is fully created with sub-fields.
+      });
+
+      console.log("CreatePoolWizard - Transaction success. Pool doc ID:", docRef.id);
+
+      // *** 3) If we get here, transaction was successful. ***
       setNewPoolId(docRef.id);
       setInviteCode(inviteCode);
       setSuccessMessage("Pool created successfully!");
       setActiveStep(4);
-  
+
+      // Analytics for pool_created
       if (!hasLoggedPoolCreated.current && analytics) {
         logEvent(analytics, "pool_created", {
           userId: user.uid,
@@ -520,29 +425,46 @@ function WizardContent({ user, authLoading, mode, location }) {
           format: selectedFormat.key,
           timestamp: new Date().toISOString(),
         });
-        console.log("CreatePoolWizard - Pool creation logged to Firebase Analytics");
         hasLoggedPoolCreated.current = true;
       }
-  
-      // Navigate to the pool dashboard
+
+      // Log strips or squares initialization if needed
+      if (selectedFormat.key === "strip_cards" && analytics && !hasLoggedStripsInitialized.current) {
+        logEvent(analytics, "strips_initialized", {
+          userId: user.uid,
+          poolId: docRef.id,
+          stripCount: 10,
+          timestamp: new Date().toISOString(),
+        });
+        hasLoggedStripsInitialized.current = true;
+      } else if (selectedFormat.key === "squares" && analytics && !hasLoggedSquaresInitialized.current) {
+        logEvent(analytics, "squares_initialized", {
+          userId: user.uid,
+          poolId: docRef.id,
+          squareCount: 100,
+          timestamp: new Date().toISOString(),
+        });
+        hasLoggedSquaresInitialized.current = true;
+      }
+
+      // Finally, navigate to the new pool
       navigate(`/pool/${docRef.id}`);
     } catch (err) {
-      console.error("CreatePoolWizard - Firestore Error:", err, err.stack);
+      console.error("CreatePoolWizard - Transaction Error:", err);
       let userFriendlyError = "Failed to create pool. Please try again.";
       if (err.code === "permission-denied") {
         userFriendlyError =
           "You do not have permission to create a pool. Please contact support.";
       } else if (err.code === "unavailable") {
-        userFriendlyError =
-          "Firestore is currently unavailable. Please try again later.";
+        userFriendlyError = "Firestore is currently unavailable. Please try again later.";
       } else if (err.code === "invalid-argument") {
-        userFriendlyError =
-          "Invalid data provided. Please check your inputs and try again.";
+        userFriendlyError = "Invalid data provided. Please check your inputs and try again.";
       } else if (err.message) {
         userFriendlyError = err.message;
       }
       setError(userFriendlyError);
-  
+
+      // Analytics for pool_creation_failed
       if (analytics) {
         logEvent(analytics, "pool_creation_failed", {
           userId: user?.uid || "anonymous",
@@ -550,7 +472,6 @@ function WizardContent({ user, authLoading, mode, location }) {
           error_code: err.code || "unknown",
           timestamp: new Date().toISOString(),
         });
-        console.log("CreatePoolWizard - Pool creation failure logged to Firebase Analytics");
       }
     } finally {
       setCreating(false);
@@ -565,10 +486,11 @@ function WizardContent({ user, authLoading, mode, location }) {
     sanitizeInput,
     generateUniqueInviteCode,
     navigate,
-    withRetry,
+    hasLoggedPoolCreated,
+    hasLoggedStripsInitialized,
+    hasLoggedSquaresInitialized,
   ]);
 
-  // Cancel wizard
   const handleCancelWizard = useCallback(() => {
     navigate("/dashboard");
     if (!hasLoggedWizardCanceled.current && analytics) {
@@ -577,23 +499,20 @@ function WizardContent({ user, authLoading, mode, location }) {
         currentStep: activeStep,
         timestamp: new Date().toISOString(),
       });
-      console.log("CreatePoolWizard - Wizard canceled logged to Firebase Analytics");
       hasLoggedWizardCanceled.current = true;
     }
   }, [navigate, analytics, user, activeStep]);
 
-  // Share invite link
   const handleShareInvite = useCallback(() => {
-    const inviteUrl = `${window.location.origin}/join?code=${inviteCode}`;
+    const inviteUrl = inviteCode ? `${window.location.origin}/join?code=${inviteCode}` : "";
     if (navigator.share) {
       navigator
         .share({
-          title: `Join My ${selectedFormat.name} Pool!`,
-          text: `I created a ${selectedFormat.name} pool for ${selectedSport.name} on Bonomo Sports Pools. Join now using this link!`,
+          title: `Join My ${selectedFormat?.name} Pool!`,
+          text: `I created a ${selectedFormat?.name} pool for ${selectedSport?.name}. Join now!`,
           url: inviteUrl,
         })
         .then(() => {
-          console.log("Invite shared successfully");
           if (analytics && !hasLoggedShareInvite.current) {
             logEvent(analytics, "pool_invite_shared", {
               userId: user?.uid || "anonymous",
@@ -601,7 +520,6 @@ function WizardContent({ user, authLoading, mode, location }) {
               method: "web_share",
               timestamp: new Date().toISOString(),
             });
-            console.log("CreatePoolWizard - Pool invite shared logged to Firebase Analytics");
             hasLoggedShareInvite.current = true;
           }
         })
@@ -621,7 +539,6 @@ function WizardContent({ user, authLoading, mode, location }) {
               method: "clipboard",
               timestamp: new Date().toISOString(),
             });
-            console.log("CreatePoolWizard - Pool invite copied logged to Firebase Analytics");
             hasLoggedShareInvite.current = true;
           }
         })
@@ -632,8 +549,9 @@ function WizardContent({ user, authLoading, mode, location }) {
     }
   }, [analytics, user, newPoolId, selectedFormat, selectedSport, inviteCode]);
 
-  function renderStepContent(step) {
-    switch (step) {
+  // Step rendering
+  function renderStepContent(stepIndex) {
+    switch (stepIndex) {
       case 0:
         return renderSelectSport();
       case 1:
@@ -647,6 +565,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     }
   }
 
+  // Step 0: Sport
   function renderSelectSport() {
     return (
       <Box>
@@ -678,7 +597,6 @@ function WizardContent({ user, authLoading, mode, location }) {
                           sportKey: sport.key,
                           timestamp: new Date().toISOString(),
                         });
-                        console.log("CreatePoolWizard - Sport selection logged to Firebase Analytics");
                         hasLoggedSportSelected.current = true;
                       }
                     }
@@ -697,7 +615,6 @@ function WizardContent({ user, authLoading, mode, location }) {
                           sportKey: sport.key,
                           timestamp: new Date().toISOString(),
                         });
-                        console.log("CreatePoolWizard - Sport selection logged to Firebase Analytics");
                         hasLoggedSportSelected.current = true;
                       }
                     }
@@ -740,6 +657,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     );
   }
 
+  // Step 1: Format
   function renderSelectFormat() {
     return (
       <Box>
@@ -769,7 +687,6 @@ function WizardContent({ user, authLoading, mode, location }) {
                         formatKey: fmt.key,
                         timestamp: new Date().toISOString(),
                       });
-                      console.log("CreatePoolWizard - Format selection logged to Firebase Analytics");
                       hasLoggedFormatSelected.current = true;
                     }
                   }}
@@ -787,7 +704,6 @@ function WizardContent({ user, authLoading, mode, location }) {
                           formatKey: fmt.key,
                           timestamp: new Date().toISOString(),
                         });
-                        console.log("CreatePoolWizard - Format selection logged to Firebase Analytics");
                         hasLoggedFormatSelected.current = true;
                       }
                     }
@@ -807,10 +723,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                     >
                       {fmt.name}
                     </Typography>
-                    <Typography
-                      variant="body2"
-                      sx={{ fontFamily: "'Poppins', sans-serif" }}
-                    >
+                    <Typography variant="body2" sx={{ fontFamily: "'Poppins', sans-serif" }}>
                       {fmt.desc}
                     </Typography>
                   </CardActionArea>
@@ -839,6 +752,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     );
   }
 
+  // Step 2: Name Pool
   function renderNamePool() {
     return (
       <Box>
@@ -891,6 +805,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     );
   }
 
+  // Step 3: Review & Create
   function renderReviewCreate() {
     return (
       <Box>
@@ -946,7 +861,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           </Typography>
         </Box>
         <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
-          After creation, you can customize event details, rules, and settings from the commissioner’s page.
+          After creation, you can customize additional rules and settings in the commissioner’s page.
         </Alert>
         <Box sx={{ display: "flex", justifyContent: "space-between", mt: 4 }}>
           <StyledButton
@@ -964,10 +879,11 @@ function WizardContent({ user, authLoading, mode, location }) {
             >
               Cancel
             </StyledButton>
+            {/* Notice we now call the transaction-based method */}
             <StyledButton onClick={handleCreatePool} disabled={creating} aria-label="Create pool">
               {creating ? (
                 <>
-                  Creating...{" "}
+                  Creating...
                   <CircularProgress size={20} sx={{ ml: 1 }} aria-label="Creating pool" />
                 </>
               ) : (
@@ -980,6 +896,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     );
   }
 
+  // Step 4: Finish
   function renderFinish() {
     const inviteUrl = inviteCode ? `${window.location.origin}/join?code=${inviteCode}` : "";
     return (
@@ -1028,11 +945,7 @@ function WizardContent({ user, authLoading, mode, location }) {
               variant="outlined"
               inputProps={{ "aria-label": "Invite link for pool" }}
             />
-            <StyledButton
-              onClick={handleShareInvite}
-              startIcon={<ShareIcon />}
-              aria-label="Share invite link for pool"
-            >
+            <StyledButton onClick={handleShareInvite} startIcon={<ShareIcon />} aria-label="Share invite link for pool">
               Share Invite Link
             </StyledButton>
           </Box>
@@ -1059,7 +972,7 @@ function WizardContent({ user, authLoading, mode, location }) {
     );
   }
 
-  // Show loading UI while auth state is resolving
+  // While loading auth
   if (authLoading) {
     return (
       <WizardContainer>
@@ -1120,6 +1033,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                 </Step>
               ))}
             </StyledStepper>
+
             {error && (
               <Fade in timeout={500}>
                 <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} role="alert" aria-live="assertive">
@@ -1127,21 +1041,18 @@ function WizardContent({ user, authLoading, mode, location }) {
                 </Alert>
               </Fade>
             )}
+
             <Snackbar
               open={!!successMessage}
               autoHideDuration={3000}
               onClose={() => setSuccessMessage("")}
               anchorOrigin={{ vertical: "top", horizontal: "center" }}
             >
-              <Alert
-                severity="success"
-                sx={{ fontFamily: "'Poppins', sans-serif" }}
-                role="alert"
-                aria-live="assertive"
-              >
+              <Alert severity="success" sx={{ fontFamily: "'Poppins', sans-serif" }} role="alert" aria-live="assertive">
                 {successMessage}
               </Alert>
             </Snackbar>
+
             <Box
               sx={{
                 p: 4,
@@ -1166,5 +1077,12 @@ export default function CreatePoolWizard() {
   const { mode } = useThemeContext();
   const location = useLocation();
 
-  return <WizardContent user={user} authLoading={authLoading} mode={mode} location={location} />;
+  return (
+    <WizardContent
+      user={user}
+      authLoading={authLoading}
+      mode={mode}
+      location={location}
+    />
+  );
 }

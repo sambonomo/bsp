@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { Routes, Route, Navigate, Link as RouterLink } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { getAnalyticsService } from "../firebase/config";
 import { logEvent } from "firebase/analytics";
 import { Box, Typography, Button, CircularProgress, Fade } from "@mui/material";
-import { lazy, Suspense } from "react";
 
 // Lazy-loaded Pages
 const LandingPage = lazy(() => import("../pages/LandingPage"));
@@ -13,29 +12,27 @@ const SignupPage = lazy(() => import("../pages/SignupPage"));
 const Dashboard = lazy(() => import("../pages/Dashboard"));
 const CreatePoolWizard = lazy(() => import("../pages/CreatePoolWizard"));
 const JoinPool = lazy(() => import("../pages/JoinPool"));
-const ManagePool = lazy(() => import("../pages/ManagePool"));
-const ManageMatchupsPage = lazy(() => import("../pages/ManageMatchupsPage"));
 const SubscriptionPage = lazy(() => import("../pages/SubscriptionPage"));
 const TOSPage = lazy(() => import("../pages/TOSPage"));
 const Account = lazy(() => import("../pages/Account"));
 const ChangePassword = lazy(() => import("../pages/ChangePassword"));
 const PoolList = lazy(() => import("../components/pools/PoolList"));
 const PoolDashboard = lazy(() => import("../components/pools/PoolDashboard"));
-const CommissionerSettingsPage = lazy(() => import("../pages/CommissionerSettingsPage"));
+
+// NEW: Import CommissionerDashboard (instead of ManagePool, CommissionerSettingsPage, etc.)
+const CommissionerDashboard = lazy(() => import("../pages/Commissioner/CommissionerDashboard"));
 
 // ProtectedRoute component to restrict access to authenticated users
 function ProtectedRoute({ element }) {
   const { user, authLoading } = useAuth();
-  const [analytics, setAnalytics] = useState(null); // State for analytics
-  const hasLoggedUnauthorized = useRef(false); // Track if unauthorized_access_attempt has been logged
+  const [analytics, setAnalytics] = useState(null);
+  const hasLoggedUnauthorized = useRef(false);
 
-  // Initialize analytics
   useEffect(() => {
     const analyticsInstance = getAnalyticsService();
     setAnalytics(analyticsInstance);
   }, []);
 
-  // Log unauthorized access attempt if user is not authenticated
   useEffect(() => {
     if (!authLoading && !user && !hasLoggedUnauthorized.current) {
       if (analytics) {
@@ -44,11 +41,11 @@ function ProtectedRoute({ element }) {
           path: window.location.pathname,
           timestamp: new Date().toISOString(),
         });
-        console.log("ProtectedRoute - Unauthorized access attempt logged to Firebase Analytics");
+        console.log("ProtectedRoute - Unauthorized access attempt logged");
         hasLoggedUnauthorized.current = true;
       }
 
-      // Announce redirect for accessibility
+      // Accessibility announcement
       const announcement = "You are being redirected to the login page because you are not authenticated.";
       const liveRegion = document.createElement("div");
       liveRegion.setAttribute("aria-live", "assertive");
@@ -62,9 +59,8 @@ function ProtectedRoute({ element }) {
       document.body.appendChild(liveRegion);
       setTimeout(() => document.body.removeChild(liveRegion), 1000);
     }
-  }, [authLoading, user, analytics]); // Added analytics to dependencies
+  }, [authLoading, user, analytics]);
 
-  // Reset logging flag when user changes
   useEffect(() => {
     hasLoggedUnauthorized.current = false;
   }, [user?.uid]);
@@ -103,19 +99,17 @@ function PublicRoute({ element }) {
   return element;
 }
 
-// NotFoundPage component for 404 errors
+// 404 NotFoundPage
 function NotFoundPage() {
-  const { user } = useAuth(); // Define user here using useAuth
-  const [analytics, setAnalytics] = useState(null); // State for analytics
-  const hasLoggedNotFound = useRef(false); // Track if page_not_found has been logged
+  const { user } = useAuth();
+  const [analytics, setAnalytics] = useState(null);
+  const hasLoggedNotFound = useRef(false);
 
-  // Initialize analytics
   useEffect(() => {
     const analyticsInstance = getAnalyticsService();
     setAnalytics(analyticsInstance);
   }, []);
 
-  // Log 404 error
   useEffect(() => {
     if (!hasLoggedNotFound.current && analytics) {
       logEvent(analytics, "page_not_found", {
@@ -126,7 +120,7 @@ function NotFoundPage() {
       console.log("AppRoutes - 404 error logged to Firebase Analytics");
       hasLoggedNotFound.current = true;
     }
-  }, [user?.uid, analytics]); // Added analytics to dependencies
+  }, [user?.uid, analytics]);
 
   return (
     <Box sx={{ py: 4, textAlign: "center" }} role="alert" aria-label="Page not found">
@@ -188,8 +182,6 @@ function NotFoundPage() {
 }
 
 function AppRoutes() {
-  const { user } = useAuth();
-
   return (
     <Suspense
       fallback={
@@ -216,9 +208,19 @@ function AppRoutes() {
             <Route path="/dashboard" element={<ProtectedRoute element={<Dashboard />} />} />
             <Route path="/create-pool" element={<ProtectedRoute element={<CreatePoolWizard />} />} />
             <Route path="/pool/:poolId" element={<ProtectedRoute element={<PoolDashboard />} />} />
-            <Route path="/manage-pool/:poolId" element={<ProtectedRoute element={<ManagePool />} />} />
-            <Route path="/manage-matchups/:poolId" element={<ProtectedRoute element={<ManageMatchupsPage />} />} />
-            <Route path="/commissioner-settings/:poolId" element={<ProtectedRoute element={<CommissionerSettingsPage />} />} />
+
+            {/* NEW: Commissioner Dashboard Route */}
+            <Route
+              path="/commissioner/:poolId"
+              element={<ProtectedRoute element={<CommissionerDashboard />} />}
+            />
+
+            {/* 
+              Remove or comment out old references:
+              <Route path="/manage-pool/:poolId" element={<ProtectedRoute element={<ManagePool />} />} />
+              <Route path="/commissioner-settings/:poolId" element={<ProtectedRoute element={<CommissionerSettingsPage />} />} />
+            */}
+
             <Route path="/account" element={<ProtectedRoute element={<Account />} />} />
             <Route path="/change-password" element={<ProtectedRoute element={<ChangePassword />} />} />
 

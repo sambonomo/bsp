@@ -1,4 +1,7 @@
-import { getAnalyticsService } from "../firebase/config"; // Updated import
+/***********************************
+ * validations.js (UPDATED VERSION)
+ ***********************************/
+import { getAnalyticsService } from "../firebase/config";
 import { logEvent } from "firebase/analytics";
 
 // Initialize Firebase Analytics service
@@ -51,6 +54,7 @@ export function validateEmail(email) {
       });
       console.log("validateEmail - Success logged to Firebase Analytics");
     }
+    return null;
   } else {
     if (analytics) {
       logEvent(analytics, "validate_email_failed", {
@@ -60,9 +64,8 @@ export function validateEmail(email) {
       });
       console.log("validateEmail - Failure logged to Firebase Analytics");
     }
+    return "Please enter a valid email address.";
   }
-
-  return isValid ? null : "Please enter a valid email address.";
 }
 
 /**
@@ -75,7 +78,6 @@ export function validateEmail(email) {
  * @returns {string|null} - Error message if invalid, null if valid
  */
 export function validatePassword(password) {
-  // Validate password type and presence
   if (typeof password !== "string") {
     console.error("validatePassword - Invalid password type:", typeof password);
     if (analytics) {
@@ -169,12 +171,11 @@ export function validatePassword(password) {
 
 /**
  * Validates that two passwords match (e.g., new password and confirm password).
- * @param {string} password - First password
- * @param {string} confirmPassword - Confirmation password
- * @returns {string|null} - Error message if invalid, null if valid
+ * @param {string} password
+ * @param {string} confirmPassword
+ * @returns {string|null}
  */
 export function validateConfirmPassword(password, confirmPassword) {
-  // Validate types
   if (typeof password !== "string" || typeof confirmPassword !== "string") {
     console.error("validateConfirmPassword - Invalid input types:", { password, confirmPassword });
     if (analytics) {
@@ -231,6 +232,7 @@ export function validateConfirmPassword(password, confirmPassword) {
       });
       console.log("validateConfirmPassword - Success logged to Firebase Analytics");
     }
+    return null;
   } else {
     if (analytics) {
       logEvent(analytics, "validate_confirm_password_failed", {
@@ -241,21 +243,19 @@ export function validateConfirmPassword(password, confirmPassword) {
       });
       console.log("validateConfirmPassword - Failure logged to Firebase Analytics");
     }
+    return "Passwords do not match.";
   }
-
-  return isMatch ? null : "Passwords do not match.";
 }
 
 /**
  * Validates a pool name:
  * - Required
  * - Must not exceed 100 characters
- * - Must not contain special characters except spaces, hyphens, and underscores
- * @param {string} name - Pool name to validate
- * @returns {string|null} - Error message if invalid, null if valid
+ * - Can contain letters, numbers, spaces, underscores, hyphens, and basic punctuation (.,!?)
+ * @param {string} name
+ * @returns {string|null}
  */
 export function validatePoolName(name) {
-  // Validate type
   if (typeof name !== "string") {
     console.error("validatePoolName - Invalid pool name type:", typeof name);
     if (analytics) {
@@ -296,19 +296,20 @@ export function validatePoolName(name) {
     return "Pool name cannot exceed 100 characters.";
   }
 
-  // Allow letters, numbers, spaces, hyphens, and underscores
-  const re = /^[a-zA-Z0-9\s\-_]+$/;
+  // Allowed: letters, numbers, spaces, underscores, hyphens, .,!?
+  const re = /^[a-zA-Z0-9\s_\-.,!?]+$/;
   if (!re.test(trimmedName)) {
     console.warn("validatePoolName - Invalid characters in pool name:", trimmedName);
     if (analytics) {
       logEvent(analytics, "validate_pool_name_failed", {
-        error_message: "Pool name can only contain letters, numbers, spaces, hyphens, and underscores.",
+        error_message:
+          "Pool name can only contain letters, numbers, spaces, underscores, hyphens, and .,!?",
         name: trimmedName,
         timestamp: new Date().toISOString(),
       });
       console.log("validatePoolName - Failure logged to Firebase Analytics");
     }
-    return "Pool name can only contain letters, numbers, spaces, hyphens, and underscores.";
+    return "Pool name can only contain letters, numbers, spaces, underscores, hyphens, and .,!?";
   }
 
   console.log("validatePoolName - Pool name valid:", trimmedName);
@@ -328,11 +329,10 @@ export function validatePoolName(name) {
  * Validates a buy-in amount:
  * - Required
  * - Must be a positive number or "Donations only"
- * @param {string} amount - Buy-in amount to validate
- * @returns {string|null} - Error message if invalid, null if valid
+ * @param {string} amount
+ * @returns {string|null}
  */
 export function validateBuyInAmount(amount) {
-  // Validate type
   if (typeof amount !== "string") {
     console.error("validateBuyInAmount - Invalid buy-in amount type:", typeof amount);
     if (analytics) {
@@ -385,6 +385,7 @@ export function validateBuyInAmount(amount) {
       });
       console.log("validateBuyInAmount - Success logged to Firebase Analytics");
     }
+    return null;
   } else {
     if (analytics) {
       logEvent(analytics, "validate_buy_in_amount_failed", {
@@ -394,20 +395,18 @@ export function validateBuyInAmount(amount) {
       });
       console.log("validateBuyInAmount - Failure logged to Firebase Analytics");
     }
+    return "Buy-in amount must be a positive number or 'Donations only'.";
   }
-
-  return isValid ? null : "Buy-in amount must be a positive number or 'Donations only'.";
 }
 
 /**
  * Validates an invite code:
  * - Required
  * - Must be 6 alphanumeric characters
- * @param {string} code - Invite code to validate
- * @returns {string|null} - Error message if invalid, null if valid
+ * @param {string} code
+ * @returns {string|null}
  */
 export function validateInviteCode(code) {
-  // Validate type
   if (typeof code !== "string") {
     console.error("validateInviteCode - Invalid invite code type:", typeof code);
     if (analytics) {
@@ -447,6 +446,7 @@ export function validateInviteCode(code) {
       });
       console.log("validateInviteCode - Success logged to Firebase Analytics");
     }
+    return null;
   } else {
     if (analytics) {
       logEvent(analytics, "validate_invite_code_failed", {
@@ -456,19 +456,17 @@ export function validateInviteCode(code) {
       });
       console.log("validateInviteCode - Failure logged to Firebase Analytics");
     }
+    return "Invite code must be 6 alphanumeric characters.";
   }
-
-  return isValid ? null : "Invite code must be 6 alphanumeric characters.";
 }
 
 /**
  * Validates a payout structure for Square Pools:
  * - Percentages for Q1, Q2, Q3, and Final must total 100%
- * @param {{ q1: number, q2: number, q3: number, final: number }} structure - Payout structure
- * @returns {string|null} - Error message if invalid, null if valid
+ * @param {{ q1: number, q2: number, q3: number, final: number }} structure
+ * @returns {string|null}
  */
 export function validatePayoutStructure(structure) {
-  // Validate type and presence
   if (!structure || typeof structure !== "object") {
     console.error("validatePayoutStructure - Invalid structure:", structure);
     if (analytics) {
@@ -518,6 +516,7 @@ export function validatePayoutStructure(structure) {
       });
       console.log("validatePayoutStructure - Success logged to Firebase Analytics");
     }
+    return null;
   } else {
     if (analytics) {
       logEvent(analytics, "validate_payout_structure_failed", {
@@ -528,20 +527,18 @@ export function validatePayoutStructure(structure) {
       });
       console.log("validatePayoutStructure - Failure logged to Firebase Analytics");
     }
+    return "Payout percentages must total 100%.";
   }
-
-  return isValid ? null : "Payout percentages must total 100%.";
 }
 
 /**
  * Validates pool settings for Square Pools or Strip Cards:
  * - Total pot must be non-negative
  * - Number of strip cards must be between 1 and 20 (if applicable)
- * @param {{ totalPot: number|string, stripCardCount?: number, format: string }} settings - Pool settings
- * @returns {string|null} - Error message if invalid, null if valid
+ * @param {{ totalPot: number|string, stripCardCount?: number, format: string }} settings
+ * @returns {string|null}
  */
 export function validatePoolSettings(settings) {
-  // Validate type and presence
   if (!settings || typeof settings !== "object") {
     console.error("validatePoolSettings - Invalid settings:", settings);
     if (analytics) {
@@ -588,7 +585,8 @@ export function validatePoolSettings(settings) {
 
   // Validate strip card count if format is strip_cards
   if (format === "strip_cards") {
-    const parsedCount = typeof stripCardCount === "string" ? parseInt(stripCardCount, 10) : stripCardCount;
+    const parsedCount =
+      typeof stripCardCount === "string" ? parseInt(stripCardCount, 10) : stripCardCount;
     if (typeof parsedCount !== "number" || isNaN(parsedCount) || parsedCount < 1 || parsedCount > 20) {
       console.warn("validatePoolSettings - Invalid strip card count:", stripCardCount);
       if (analytics) {
@@ -618,8 +616,8 @@ export function validatePoolSettings(settings) {
 /**
  * Validates a score input for Square Pools:
  * - Must be a non-negative integer
- * @param {string|number} score - Score to validate
- * @returns {string|null} - Error message if invalid, null if valid
+ * @param {string|number} score
+ * @returns {string|null}
  */
 export function validateScoreInput(score) {
   const parsedScore = typeof score === "string" ? parseInt(score, 10) : score;
@@ -634,6 +632,7 @@ export function validateScoreInput(score) {
       });
       console.log("validateScoreInput - Success logged to Firebase Analytics");
     }
+    return null;
   } else {
     if (analytics) {
       logEvent(analytics, "validate_score_input_failed", {
@@ -643,9 +642,8 @@ export function validateScoreInput(score) {
       });
       console.log("validateScoreInput - Failure logged to Firebase Analytics");
     }
+    return "Score must be a non-negative integer.";
   }
-
-  return isValid ? null : "Score must be a non-negative integer.";
 }
 
 /**
@@ -656,11 +654,10 @@ export function validateScoreInput(score) {
  * - awayTeam: string, ≤100 characters
  * - startTime: string, ≤50 characters
  * - status: must be 'pending' or 'completed'
- * @param {{ gameId: string, homeTeam: string, awayTeam: string, startTime: string, status: string }} matchup - Matchup object to validate
- * @returns {string|null} - Error message if invalid, null if valid
+ * @param {{ gameId: string, homeTeam: string, awayTeam: string, startTime: string, status: string }} matchup
+ * @returns {string|null}
  */
 export function validateMatchup(matchup) {
-  // Validate type and presence
   if (!matchup || typeof matchup !== "object") {
     console.error("validateMatchup - Invalid matchup:", matchup);
     if (analytics) {
@@ -676,7 +673,6 @@ export function validateMatchup(matchup) {
 
   const { gameId, homeTeam, awayTeam, startTime, status } = matchup;
 
-  // Validate presence of required fields
   if (!gameId || !homeTeam || !awayTeam || !startTime || !status) {
     console.warn("validateMatchup - Missing required fields:", matchup);
     if (analytics) {
@@ -690,7 +686,6 @@ export function validateMatchup(matchup) {
     return "Matchup must include gameId, homeTeam, awayTeam, startTime, and status.";
   }
 
-  // Validate gameId
   if (typeof gameId !== "string" || gameId.length > 50) {
     console.warn("validateMatchup - Invalid gameId:", gameId);
     if (analytics) {
@@ -705,7 +700,6 @@ export function validateMatchup(matchup) {
     return "gameId must be a string with 50 or fewer characters.";
   }
 
-  // Validate homeTeam
   if (typeof homeTeam !== "string" || homeTeam.length > 100) {
     console.warn("validateMatchup - Invalid homeTeam:", homeTeam);
     if (analytics) {
@@ -720,7 +714,6 @@ export function validateMatchup(matchup) {
     return "homeTeam must be a string with 100 or fewer characters.";
   }
 
-  // Validate awayTeam
   if (typeof awayTeam !== "string" || awayTeam.length > 100) {
     console.warn("validateMatchup - Invalid awayTeam:", awayTeam);
     if (analytics) {
@@ -735,7 +728,6 @@ export function validateMatchup(matchup) {
     return "awayTeam must be a string with 100 or fewer characters.";
   }
 
-  // Validate startTime
   if (typeof startTime !== "string" || startTime.length > 50) {
     console.warn("validateMatchup - Invalid startTime:", startTime);
     if (analytics) {
@@ -750,7 +742,6 @@ export function validateMatchup(matchup) {
     return "startTime must be a string with 50 or fewer characters.";
   }
 
-  // Validate status
   if (typeof status !== "string" || !["pending", "completed"].includes(status)) {
     console.warn("validateMatchup - Invalid status:", status);
     if (analytics) {
@@ -774,5 +765,82 @@ export function validateMatchup(matchup) {
     console.log("validateMatchup - Success logged to Firebase Analytics");
   }
 
+  return null;
+}
+
+/**
+ * Validates a pool deadline:
+ * - Must not be empty
+ * - Must parse as a valid date
+ * - Must be in the future (compared to current time)
+ * @param {string} deadline - Typically an ISO string (or a local date/time string).
+ * @returns {string|null} - Error message if invalid, null if valid
+ */
+export function validatePoolDeadline(deadline) {
+  if (typeof deadline !== "string") {
+    console.error("validatePoolDeadline - Invalid deadline type:", typeof deadline);
+    if (analytics) {
+      logEvent(analytics, "validate_pool_deadline_failed", {
+        error_message: "Deadline must be a string (ISO or date/time).",
+        deadline,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("validatePoolDeadline - Failure logged to Firebase Analytics");
+    }
+    return "Deadline must be a valid date/time string.";
+  }
+
+  const trimmed = deadline.trim();
+  if (!trimmed) {
+    console.warn("validatePoolDeadline - Deadline is required:", trimmed);
+    if (analytics) {
+      logEvent(analytics, "validate_pool_deadline_failed", {
+        error_message: "Deadline is required.",
+        deadline: trimmed,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("validatePoolDeadline - Failure logged to Firebase Analytics");
+    }
+    return "Deadline is required.";
+  }
+
+  // Attempt to parse date
+  const dateValue = new Date(trimmed);
+  if (isNaN(dateValue.getTime())) {
+    console.warn("validatePoolDeadline - Invalid date format:", trimmed);
+    if (analytics) {
+      logEvent(analytics, "validate_pool_deadline_failed", {
+        error_message: "Deadline must be a valid date/time.",
+        deadline: trimmed,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("validatePoolDeadline - Failure logged to Firebase Analytics");
+    }
+    return "Deadline must be a valid date/time.";
+  }
+
+  // Must be in the future
+  const now = new Date();
+  if (dateValue <= now) {
+    console.warn("validatePoolDeadline - Deadline is not in the future:", dateValue);
+    if (analytics) {
+      logEvent(analytics, "validate_pool_deadline_failed", {
+        error_message: "Deadline must be in the future.",
+        deadline: dateValue.toISOString(),
+        timestamp: new Date().toISOString(),
+      });
+      console.log("validatePoolDeadline - Failure logged to Firebase Analytics");
+    }
+    return "Deadline must be in the future.";
+  }
+
+  console.log("validatePoolDeadline - Deadline valid:", dateValue.toISOString());
+  if (analytics) {
+    logEvent(analytics, "validate_pool_deadline_success", {
+      deadline: dateValue.toISOString(),
+      timestamp: new Date().toISOString(),
+    });
+    console.log("validatePoolDeadline - Success logged to Firebase Analytics");
+  }
   return null;
 }
