@@ -409,14 +409,14 @@ function WizardContent({ user, authLoading, mode, location }) {
       );
       return;
     }
-
+  
     try {
       setCreating(true);
       setError("");
-
+  
       const inviteCode = await generateUniqueInviteCode();
       const sanitizedPoolName = sanitizeInput(poolName);
-
+  
       // Validate field lengths
       if (sanitizedPoolName.length > 100) {
         throw new Error("Pool Name must be 100 characters or less.");
@@ -424,7 +424,7 @@ function WizardContent({ user, authLoading, mode, location }) {
       if (selectedSport.name.length > 50) {
         throw new Error("Sport name must be 50 characters or less.");
       }
-
+  
       const newPoolData = {
         poolName: sanitizedPoolName,
         format: selectedFormat.key,
@@ -433,18 +433,19 @@ function WizardContent({ user, authLoading, mode, location }) {
         createdAt: serverTimestamp(),
         commissionerId: user.uid,
         memberIds: [user.uid],
+        isFeatured: false, // Added default value
         // Additional optional data
         sportKey: selectedSport.key,
         formatName: selectedFormat.name,
         inviteCode,
       };
       console.log("CreatePoolWizard - Creating Pool with Data:", newPoolData);
-
+  
       const docRef = await withRetry("Create Pool", () =>
         addDoc(collection(db, "pools"), newPoolData)
       );
       console.log("CreatePoolWizard - Pool Created with ID:", docRef.id);
-
+  
       // Initialize format-specific data
       if (selectedFormat.key === "strip_cards") {
         const strips = [];
@@ -505,12 +506,12 @@ function WizardContent({ user, authLoading, mode, location }) {
           hasLoggedSquaresInitialized.current = true;
         }
       }
-
+  
       setNewPoolId(docRef.id);
       setInviteCode(inviteCode);
       setSuccessMessage("Pool created successfully!");
       setActiveStep(4);
-
+  
       if (!hasLoggedPoolCreated.current && analytics) {
         logEvent(analytics, "pool_created", {
           userId: user.uid,
@@ -522,7 +523,7 @@ function WizardContent({ user, authLoading, mode, location }) {
         console.log("CreatePoolWizard - Pool creation logged to Firebase Analytics");
         hasLoggedPoolCreated.current = true;
       }
-
+  
       // Navigate to the pool dashboard
       navigate(`/pool/${docRef.id}`);
     } catch (err) {
@@ -541,7 +542,7 @@ function WizardContent({ user, authLoading, mode, location }) {
         userFriendlyError = err.message;
       }
       setError(userFriendlyError);
-
+  
       if (analytics) {
         logEvent(analytics, "pool_creation_failed", {
           userId: user?.uid || "anonymous",

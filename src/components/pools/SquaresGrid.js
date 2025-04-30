@@ -1,14 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { getDb, getAnalyticsService } from "../../firebase/config";
 import {
-  collection,
-  query,
-  onSnapshot,
-  updateDoc,
   doc,
   getDoc,
-  setDoc,
-  arrayUnion,
+  onSnapshot,
+  updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { useAuth } from "../../contexts/AuthContext";
@@ -37,41 +33,47 @@ import {
 import RefreshIcon from "@mui/icons-material/Refresh";
 
 // Styled components for polished UI
-const GridContainer = styled(Box)(({ theme, isMobile }) => ({
-  display: "grid",
-  gridTemplateColumns: isMobile ? "60px repeat(10, 60px)" : "72px repeat(10, 72px)",
-  gridTemplateRows: isMobile ? "60px repeat(10, 60px)" : "72px repeat(10, 72px)",
-  gap: "2px",
-  backgroundColor: theme.palette.mode === "dark" ? "#1a2b4d" : "#e0e7ff",
-  padding: theme.spacing(1.5),
-  borderRadius: theme.shape.borderRadius * 2,
-  border: "2px solid",
-  borderColor: theme.palette.mode === "dark" ? "#ff9500" : "#3b82f6",
-  boxShadow: theme.shadows[4],
-  transition: theme.transitions.create("background-color", {
-    duration: theme.transitions.duration.standard,
-    easing: theme.transitions.easing.easeInOut,
-  }),
-  margin: "0 auto",
-  width: "100%",
-  maxWidth: isMobile ? "708px" : "840px",
-  boxSizing: "border-box",
-}));
+const GridContainer = styled(Box)(({ theme }) => {
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  return {
+    display: "grid",
+    gridTemplateColumns: isMobile ? "60px repeat(10, 60px)" : "72px repeat(10, 72px)",
+    gridTemplateRows: isMobile ? "60px repeat(10, 60px)" : "72px repeat(10, 72px)",
+    gap: "2px",
+    backgroundColor: theme.palette.mode === "dark" ? "#1a2b4d" : "#e0e7ff",
+    padding: theme.spacing(1.5),
+    borderRadius: theme.shape.borderRadius * 2,
+    border: "2px solid",
+    borderColor: theme.palette.mode === "dark" ? "#ff9500" : "#3b82f6",
+    boxShadow: theme.shadows[4],
+    transition: theme.transitions.create("background-color", {
+      duration: theme.transitions.duration.standard,
+      easing: theme.transitions.easing.easeInOut,
+    }),
+    margin: "0 auto",
+    width: "100%",
+    maxWidth: isMobile ? "708px" : "840px",
+    boxSizing: "border-box",
+  };
+});
 
-const AxisLabel = styled(Box)(({ theme, isMobile }) => ({
-  backgroundColor: theme.palette.mode === "dark" ? "#2c3e50" : "#3b82f6",
-  color: "#ffffff",
-  fontFamily: "'Poppins', sans-serif'",
-  fontWeight: 700,
-  fontSize: isMobile ? "1.2rem" : "1.32rem",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  border: "1px solid",
-  borderColor: theme.palette.mode === "dark" ? "#ff9500" : "#1e40af",
-  borderRadius: theme.shape.borderRadius,
-  boxShadow: theme.shadows[1],
-}));
+const AxisLabel = styled(Box)(({ theme }) => {
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  return {
+    backgroundColor: theme.palette.mode === "dark" ? "#2c3e50" : "#3b82f6",
+    color: "#ffffff",
+    fontFamily: "'Poppins', sans-serif'",
+    fontWeight: 700,
+    fontSize: isMobile ? "1.2rem" : "1.32rem",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid",
+    borderColor: theme.palette.mode === "dark" ? "#ff9500" : "#1e40af",
+    borderRadius: theme.shape.borderRadius,
+    boxShadow: theme.shadows[1],
+  };
+});
 
 const Square = styled(Button)(({ theme }) => ({
   padding: 0,
@@ -178,7 +180,7 @@ function SquaresGrid({ poolId, poolData }) {
       setLoading(true);
       setError("");
 
-      // Fetch the pool document from Firestore to verify commissionerId
+      // Fetch the pool document from Firestore to verify commissionerId and get squares
       const poolRef = doc(db, "pools", poolId);
       let poolDoc;
       try {
@@ -226,76 +228,75 @@ function SquaresGrid({ poolId, poolData }) {
       console.log("SquaresGrid - User in participants:", role === "participant");
       console.log("SquaresGrid - User in memberIds:", poolDataFromFirestore.memberIds?.includes(user.uid));
 
-      // Fetch squares for all users
-      const squaresRef = collection(db, "pools", poolId, "squares");
-      const q = query(squaresRef);
+      // Fetch squares from the pool document's 'squares' field (not a subcollection)
+      const unsubscribe = onSnapshot(poolRef, (docSnap) => {
+        if (!docSnap.exists()) {
+          setError("Pool no longer exists.");
+          setLoading(false);
+          return;
+        }
 
-      const unsubscribe = await withRetry("Fetch Squares", () =>
-        onSnapshot(
-          q,
-          (snapshot) => {
-            const data = snapshot.docs.map((docSnap) => ({
-              id: docSnap.id,
-              ...docSnap.data(),
-            }));
-            setSquares(data);
-            setLoading(false);
-            console.log("SquaresGrid - Fetched squares:", data);
+        const data = docSnap.data();
+        const squaresData = data.squares || {};
 
-            // Validate squares data
-            if (data.length !== 100) {
-              console.warn("SquaresGrid - Expected 100 squares for a 10x10 grid, got:", data.length);
-            }
+        // Convert squares object to array format expected by the grid
+        const squaresArray = Object.entries(squaresData).map(([id, square]) => ({
+          id,
+          ...square,
+        }));
+        setSquares(squaresArray);
+        setLoading(false);
+        console.log("SquaresGrid - Fetched squares:", squaresArray);
 
-            // Log grid load (only once)
-            if (!hasLoggedGridLoad.current && analytics) {
-              logEvent(analytics, "squares_grid_loaded", {
-                poolId,
-                userId: user.uid,
-                user_role: role,
-                squareCount: data.length,
-                timestamp: new Date().toISOString(),
-              });
-              console.log("SquaresGrid - Grid load logged to Firebase Analytics");
-              hasLoggedGridLoad.current = true;
-            }
-          },
-          (err) => {
-            console.error("SquaresGrid - Error fetching squares:", err);
-            let userFriendlyError = "Failed to fetch squares data.";
-            if (err.code === "permission-denied") {
-              userFriendlyError = `You do not have permission to view squares for this pool (Role: ${role}). Please contact support.`;
-            } else if (err.code === "unavailable") {
-              userFriendlyError = "Firestore is currently unavailable. Please try again later.";
-            }
-            setError(userFriendlyError);
-            setLoading(false);
-            if (analytics && !hasLoggedError.current) {
-              logEvent(analytics, "fetch_squares_failed", {
-                poolId,
-                userId: user.uid,
-                user_role: role,
-                pool_commissioner_id: poolDataFromFirestore.commissionerId,
-                user_in_participants: role === "participant",
-                user_in_member_ids: poolDataFromFirestore.memberIds?.includes(user.uid),
-                squares_count: squares.length,
-                axis_numbers_x: poolDataFromFirestore.axisNumbers?.x?.length || "missing",
-                axis_numbers_y: poolDataFromFirestore.axisNumbers?.y?.length || "missing",
-                error_message: userFriendlyError,
-                timestamp: new Date().toISOString(),
-              });
-              console.log("SquaresGrid - Fetch squares failure logged to Firebase Analytics");
-              hasLoggedError.current = true;
-            }
-          }
-        )
-      );
+        // Validate squares data
+        if (squaresArray.length !== 100) {
+          console.warn("SquaresGrid - Expected 100 squares for a 10x10 grid, got:", squaresArray.length);
+        }
+
+        // Log grid load (only once)
+        if (!hasLoggedGridLoad.current && analytics) {
+          logEvent(analytics, "squares_grid_loaded", {
+            poolId,
+            userId: user.uid,
+            user_role: role,
+            squareCount: squaresArray.length,
+            timestamp: new Date().toISOString(),
+          });
+          console.log("SquaresGrid - Grid load logged to Firebase Analytics");
+          hasLoggedGridLoad.current = true;
+        }
+      }, (err) => {
+        console.error("SquaresGrid - Error fetching squares:", err);
+        let userFriendlyError = "Failed to fetch squares data.";
+        if (err.code === "permission-denied") {
+          userFriendlyError = `You do not have permission to view squares for this pool (Role: ${role}). Please contact support.`;
+        } else if (err.code === "unavailable") {
+          userFriendlyError = "Firestore is currently unavailable. Please try again later.";
+        }
+        setError(userFriendlyError);
+        setLoading(false);
+        if (analytics && !hasLoggedError.current) {
+          logEvent(analytics, "fetch_squares_failed", {
+            poolId,
+            userId: user.uid,
+            user_role: role,
+            pool_commissioner_id: poolDataFromFirestore.commissionerId,
+            user_in_participants: role === "participant",
+            user_in_member_ids: poolDataFromFirestore.memberIds?.includes(user.uid),
+            squares_count: squares.length,
+            axis_numbers_x: poolDataFromFirestore.axisNumbers?.x?.length || "missing",
+            axis_numbers_y: poolDataFromFirestore.axisNumbers?.y?.length || "missing",
+            error_message: userFriendlyError,
+            timestamp: new Date().toISOString(),
+          });
+          console.log("SquaresGrid - Fetch squares failure logged to Firebase Analytics");
+          hasLoggedError.current = true;
+        }
+      });
 
       return () => {
-        if (unsubscribe) {
-          unsubscribe();
-          console.log("SquaresGrid - Unsubscribed from live updates for poolId:", poolId);
-        }
+        unsubscribe();
+        console.log("SquaresGrid - Unsubscribed from live updates for poolId:", poolId);
       };
     };
 
@@ -439,14 +440,23 @@ function SquaresGrid({ poolId, poolData }) {
       setError("");
       // Ensure displayName is fetched from Firebase Auth user profile
       const displayName = user.displayName || user.email?.split("@")[0] || "Anonymous";
-      const squareRef = doc(db, "pools", poolId, "squares", squareId);
+      const poolRef = doc(db, "pools", poolId);
+      const squareData = squares.find(s => s.id === squareId);
+      if (!squareData) {
+        throw new Error("Square not found in state.");
+      }
+
+      // Update the squares object in the pool document
       await withRetry("Claim Square", () =>
-        updateDoc(squareRef, {
-          userId: user.uid,
-          displayName: displayName,
-          status: "claimed",
-          claimedAt: new Date().toISOString(),
-          updatedAt: serverTimestamp(),
+        updateDoc(poolRef, {
+          [`squares.${squareId}`]: {
+            ...squareData,
+            userId: user.uid,
+            displayName: displayName,
+            status: "claimed",
+            claimedAt: new Date().toISOString(),
+            updatedAt: serverTimestamp(),
+          },
         })
       );
 
@@ -492,14 +502,22 @@ function SquaresGrid({ poolId, poolData }) {
   const handleUnclaimSquare = async (squareId) => {
     try {
       setError("");
-      const squareRef = doc(db, "pools", poolId, "squares", squareId);
+      const poolRef = doc(db, "pools", poolId);
+      const squareData = squares.find(s => s.id === squareId);
+      if (!squareData) {
+        throw new Error("Square not found in state.");
+      }
+
       await withRetry("Unclaim Square", () =>
-        updateDoc(squareRef, {
-          userId: null,
-          displayName: null,
-          status: "available",
-          claimedAt: null,
-          updatedAt: serverTimestamp(),
+        updateDoc(poolRef, {
+          [`squares.${squareId}`]: {
+            ...squareData,
+            userId: null,
+            displayName: null,
+            status: "available",
+            claimedAt: null,
+            updatedAt: serverTimestamp(),
+          },
         })
       );
 
@@ -677,6 +695,7 @@ function SquaresGrid({ poolId, poolData }) {
     row: Math.floor(i / 10),
     col: i % 10,
   }));
+
   // Map squares to their correct positions (square-1 to square-100)
   const sortedSquares = expectedSquares.map((defaultSquare) => {
     const foundSquare = squares.find(s => s.id === defaultSquare.id);
@@ -708,7 +727,7 @@ function SquaresGrid({ poolId, poolData }) {
           </Button>
         </Box>
 
-        <GridContainer isMobile={isMobile} role="grid" aria-label="Squares grid">
+        <GridContainer role="grid" aria-label="Squares grid">
           {/* Top-left corner (empty) */}
           <Box sx={{ backgroundColor: "transparent" }} />
 
@@ -716,7 +735,6 @@ function SquaresGrid({ poolId, poolData }) {
           {xAxis.map((digit, index) => (
             <AxisLabel
               key={`x-${index}`}
-              isMobile={isMobile}
               role="columnheader"
               aria-label={`Column ${index + 1} digit: ${digit !== "?" ? digit : "Unknown"}`}
             >
@@ -733,7 +751,6 @@ function SquaresGrid({ poolId, poolData }) {
             const yLabel = col === 0 ? (
               <AxisLabel
                 key={`y-${row}`}
-                isMobile={isMobile}
                 role="rowheader"
                 aria-label={`Row ${row + 1} digit: ${yAxis[row] !== "?" ? yAxis[row] : "Unknown"}`}
               >

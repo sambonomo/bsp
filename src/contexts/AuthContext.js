@@ -15,7 +15,8 @@ import {
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup,
-  // Removed signInWithRedirect, getRedirectResult
+  signInWithRedirect,
+  getRedirectResult,
   sendPasswordResetEmail,
   reauthenticateWithCredential,
   EmailAuthProvider,
@@ -56,7 +57,6 @@ export function useAuth() {
   return context;
 }
 
-// Provider component
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -65,6 +65,7 @@ export function AuthProvider({ children }) {
   const [loadingAnnouncement, setLoadingAnnouncement] = useState(
     "Loading authentication state..."
   );
+
   const { theme: muiTheme } = useContext(ThemeContext);
 
   // Track analytics events so they're not duplicated
@@ -82,16 +83,17 @@ export function AuthProvider({ children }) {
   // Live region for A11y announcements
   const liveRegionRef = useRef(null);
 
+  // Firebase services
   const auth = getAuthService();
   const db = getDb();
 
-  // Initialize analytics
+  // Initialize analytics once
   useEffect(() => {
     const analyticsInstance = getAnalyticsService();
     setAnalytics(analyticsInstance);
   }, []);
 
-  // Helper function to log events
+  // Helper function: logs event to Firebase Analytics (if available) & console
   const logAnalyticsEvent = useCallback(
     (eventName, data, logKey = null) => {
       if (!analytics) return;
@@ -103,7 +105,7 @@ export function AuthProvider({ children }) {
     [analytics]
   );
 
-  // Create a live region for A11y announcements
+  // A11y: Create a live region for announcements
   useEffect(() => {
     const liveRegion = document.createElement("div");
     liveRegion.setAttribute("aria-live", "polite");
@@ -166,7 +168,7 @@ export function AuthProvider({ children }) {
     [logAnalyticsEvent, user?.uid]
   );
 
-  // Subscribe to onAuthStateChanged
+  // Listen for auth state changes once
   useEffect(() => {
     console.log("AuthProvider - Initializing auth state...");
     const startTime = Date.now();
@@ -185,7 +187,7 @@ export function AuthProvider({ children }) {
 
         if (authUser) {
           try {
-            // Refresh token
+            // Force refresh the token
             await authUser.getIdToken(true);
             setUser(authUser);
             console.log("AuthProvider - Auth State Changed:", authUser);
@@ -222,6 +224,7 @@ export function AuthProvider({ children }) {
         setLoadingAnnouncement("Authentication state loaded");
       },
       (authError) => {
+        // onAuthStateChanged error callback
         const duration = Date.now() - startTime;
         console.error("AuthProvider - Auth State Error:", authError);
         setError(
@@ -239,7 +242,7 @@ export function AuthProvider({ children }) {
       }
     );
 
-    // Timeout for auth init
+    // Timeout in case onAuthStateChanged never resolves
     authTimeout = setTimeout(() => {
       if (authLoading) {
         const duration = Date.now() - startTime;
@@ -266,9 +269,21 @@ export function AuthProvider({ children }) {
     };
   }, [auth, authLoading, user?.uid, logAnalyticsEvent]);
 
-  // No more getRedirectResult or signInWithRedirect used
+  // Optionally handle redirect results if we do signInWithRedirect
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (!result) return;
+        const newUser = result.user;
+        console.log("Google Sign-In Redirect - user:", newUser);
+        // do the same doc creation logic as below, if needed
+      })
+      .catch((redirectError) => {
+        console.error("Google Sign-In Redirect Error:", redirectError);
+      });
+  }, [auth]);
 
-  // Friendly error messages
+  // Utility: Convert error codes to friendly messages
   const getFriendlyErrorMessage = (errorCode, defaultMessage) => {
     switch (errorCode) {
       case "auth/invalid-email":
@@ -286,9 +301,9 @@ export function AuthProvider({ children }) {
       case "auth/popup-blocked":
         return "Sign-in popup was blocked. Please allow popups and try again.";
       case "auth/popup-closed-by-user":
-        return "Sign-in popup was closed. Please try again.";
+        return "The sign-in popup closed unexpectedly. Please try again.";
       case "auth/network-request-failed":
-        return "Network error. Please check your internet connection and try again.";
+        return "Network error. Please check your connection.";
       case "firestore/unavailable":
         return "Database unavailable. Please try again later.";
       case "firestore/permission-denied":
@@ -300,7 +315,7 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Signup
+  // Signup with email
   const signup = useCallback(
     async (email, password, displayName = "") => {
       try {
@@ -312,6 +327,7 @@ export function AuthProvider({ children }) {
         );
         const newUser = userCredential.user;
 
+        // Create user doc
         const userRef = doc(db, "users", newUser.uid);
         await withRetry("signup - setDoc", () =>
           setDoc(
@@ -327,15 +343,10 @@ export function AuthProvider({ children }) {
           )
         );
 
-        console.log("User signed up and Firestore doc created:", newUser.uid);
-
+        console.log("User signed up:", newUser.uid);
         logAnalyticsEvent(
           "signup_success",
-          {
-            userId: newUser.uid,
-            email: newUser.email,
-            timestamp: new Date().toISOString(),
-          },
+          { userId: newUser.uid, email: newUser.email, timestamp: new Date().toISOString() },
           "signupSuccess"
         );
 
@@ -359,7 +370,7 @@ export function AuthProvider({ children }) {
     [auth, db, user?.uid, withRetry, logAnalyticsEvent]
   );
 
-  // Login
+  // Login with email
   const login = useCallback(
     async (email, password) => {
       try {
@@ -371,26 +382,16 @@ export function AuthProvider({ children }) {
         );
         const loggedInUser = userCredential.user;
 
+        // Update lastLoginAt in Firestore
         const userRef = doc(db, "users", loggedInUser.uid);
         await withRetry("login - setDoc", () =>
-          setDoc(
-            userRef,
-            {
-              lastLoginAt: serverTimestamp(),
-            },
-            { merge: true }
-          )
+          setDoc(userRef, { lastLoginAt: serverTimestamp() }, { merge: true })
         );
 
         console.log("User logged in:", loggedInUser.uid);
-
         logAnalyticsEvent(
           "login_success",
-          {
-            userId: loggedInUser.uid,
-            email,
-            timestamp: new Date().toISOString(),
-          },
+          { userId: loggedInUser.uid, email, timestamp: new Date().toISOString() },
           "loginSuccess"
         );
 
@@ -424,10 +425,7 @@ export function AuthProvider({ children }) {
 
       logAnalyticsEvent(
         "logout_success",
-        {
-          userId: user?.uid || "anonymous",
-          timestamp: new Date().toISOString(),
-        },
+        { userId: user?.uid || "anonymous", timestamp: new Date().toISOString() },
         "logoutSuccess"
       );
     } catch (logoutError) {
@@ -446,17 +444,18 @@ export function AuthProvider({ children }) {
     }
   }, [auth, user?.uid, logAnalyticsEvent]);
 
-  // Login with Google - Always uses Popup now
+  // Google Login - use Popup, fallback to Redirect on "popup-closed-by-user"
   const loginWithGoogle = useCallback(async () => {
     const googleProvider = new GoogleAuthProvider();
-    try {
-      setError(null);
+    setError(null);
 
-      // Always popup
+    try {
+      console.log("Google Sign-In - Attempting popup login...");
       const result = await signInWithPopup(auth, googleProvider);
       const newUser = result.user;
-      const userRef = doc(db, "users", newUser.uid);
 
+      // Firestore doc
+      const userRef = doc(db, "users", newUser.uid);
       const snapshot = await withRetry("loginWithGoogle - getDoc", () =>
         getDoc(userRef)
       );
@@ -480,13 +479,11 @@ export function AuthProvider({ children }) {
         await withRetry("loginWithGoogle - setDoc (existing user)", () =>
           setDoc(
             userRef,
-            {
-              lastLoginAt: serverTimestamp(),
-            },
+            { lastLoginAt: serverTimestamp() },
             { merge: true }
           )
         );
-        console.log("Google Sign-In - User logged in:", newUser.uid);
+        console.log("Google Sign-In - Existing user logged in:", newUser.uid);
       }
 
       logAnalyticsEvent(
@@ -502,16 +499,35 @@ export function AuthProvider({ children }) {
 
       return newUser;
     } catch (googleError) {
-      // Specifically handle the user closing the popup
+      // If the popup is auto-closed or domain mismatch leads to "auth/popup-closed-by-user"
       if (googleError.code === "auth/popup-closed-by-user") {
-        console.log(
-          "AuthContext - User closed Google sign-in popup before completing."
+        console.warn(
+          "Google popup closed unexpectedly. Trying redirect flow instead..."
         );
-        // No alert, no error. Return null
-        return null;
+        // Attempt fallback with signInWithRedirect
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          // The sign-in result will be handled by getRedirectResult above.
+          return null; // We'll get the user after redirect
+        } catch (redirectError) {
+          console.error("Google redirect fallback error:", redirectError);
+          const friendlyMessage = getFriendlyErrorMessage(
+            redirectError.code,
+            "Google sign-in failed."
+          );
+          alert(friendlyMessage);
+          setError(friendlyMessage);
+          logAnalyticsEvent("google_login_failure", {
+            userId: user?.uid || "anonymous",
+            error_message: friendlyMessage,
+            error_code: redirectError.code,
+            method: "redirect",
+            timestamp: new Date().toISOString(),
+          });
+          throw new Error(friendlyMessage);
+        }
       }
 
-      // For other errors
       console.error("Google Sign-In Error:", googleError);
       const friendlyMessage = getFriendlyErrorMessage(
         googleError.code,
@@ -523,7 +539,6 @@ export function AuthProvider({ children }) {
       } else {
         alert(friendlyMessage);
       }
-
       setError(friendlyMessage);
       logAnalyticsEvent("google_login_failure", {
         userId: user?.uid || "anonymous",
@@ -630,13 +645,7 @@ export function AuthProvider({ children }) {
           })
         );
 
-        console.log(
-          "Offline user added to pool:",
-          poolId,
-          "ID:",
-          newOfflineUser.id
-        );
-
+        console.log("Offline user added:", newOfflineUser.id);
         logAnalyticsEvent(
           "add_offline_user_success",
           {
@@ -653,7 +662,7 @@ export function AuthProvider({ children }) {
         console.error("Add Offline User Error:", offlineError);
         const message = getFriendlyErrorMessage(
           offlineError.code,
-          "Failed to add offline user to the pool."
+          "Failed to add offline user."
         );
         setError(message);
         logAnalyticsEvent("add_offline_user_failure", {
@@ -673,7 +682,7 @@ export function AuthProvider({ children }) {
     setError(null);
   }, []);
 
-  // Memoize context value
+  // Memoize the context value
   const value = useMemo(
     () => ({
       user,
@@ -703,59 +712,56 @@ export function AuthProvider({ children }) {
     ]
   );
 
-  // If still loading
-  return (
-    <AuthContext.Provider value={value}>
-      {authLoading ? (
-        <Fade in timeout={1000}>
-          <Box
+  if (authLoading) {
+    return (
+      <Fade in timeout={1000}>
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "center",
+            minHeight: "100vh",
+            bgcolor: muiTheme.palette.background.default,
+          }}
+          role="status"
+          aria-live="polite"
+          aria-label="Bonomo Sports Pools is loading authentication state"
+        >
+          {error && (
+            <Alert
+              severity="error"
+              sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }}
+            >
+              {error}
+            </Alert>
+          )}
+          <CircularProgress
+            sx={{ color: muiTheme.palette.secondary.main, mb: 2 }}
+          />
+          <Typography
+            variant="h6"
             sx={{
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              alignItems: "center",
-              minHeight: "100vh",
-              bgcolor: muiTheme.palette.background.default,
+              fontFamily: "'Montserrat', sans-serif'",
+              fontWeight: 700,
+              color: muiTheme.palette.text.primary,
             }}
-            role="status"
-            aria-live="polite"
-            aria-label="Bonomo Sports Pools is loading authentication state"
           >
-            {error && (
-              <Alert
-                severity="error"
-                sx={{ mb: 2, fontFamily: "'Poppins', sans-serif'" }}
-              >
-                {error}
-              </Alert>
-            )}
-            <CircularProgress
-              sx={{ color: muiTheme.palette.secondary.main, mb: 2 }}
-            />
-            <Typography
-              variant="h6"
-              sx={{
-                fontFamily: "'Montserrat', sans-serif'",
-                fontWeight: 700,
-                color: muiTheme.palette.text.primary,
-              }}
-            >
-              Bonomo Sports Pools
-            </Typography>
-            <Typography
-              variant="body1"
-              sx={{
-                fontFamily: "'Poppins', sans-serif'",
-                color: muiTheme.palette.text.secondary,
-              }}
-            >
-              Loading authentication state...
-            </Typography>
-          </Box>
-        </Fade>
-      ) : (
-        children
-      )}
-    </AuthContext.Provider>
-  );
+            Bonomo Sports Pools
+          </Typography>
+          <Typography
+            variant="body1"
+            sx={{
+              fontFamily: "'Poppins', sans-serif'",
+              color: muiTheme.palette.text.secondary,
+            }}
+          >
+            Loading authentication state...
+          </Typography>
+        </Box>
+      </Fade>
+    );
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
