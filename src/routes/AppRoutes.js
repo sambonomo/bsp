@@ -1,3 +1,5 @@
+// /src/routes/AppRoutes.js
+
 import React, { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { Routes, Route, Navigate, Link as RouterLink } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -17,12 +19,18 @@ const TOSPage = lazy(() => import("../pages/TOSPage"));
 const Account = lazy(() => import("../pages/Account"));
 const ChangePassword = lazy(() => import("../pages/ChangePassword"));
 const PoolList = lazy(() => import("../components/pools/PoolList"));
-const PoolDashboard = lazy(() => import("../components/pools/PoolDashboard"));
 
-// NEW: Import CommissionerDashboard (instead of ManagePool, CommissionerSettingsPage, etc.)
-const CommissionerDashboard = lazy(() => import("../pages/Commissioner/CommissionerDashboard"));
+// Use your single “PoolView” component for the /pool/:poolId route
+const PoolView = lazy(() => import("../pages/PoolView"));
 
-// ProtectedRoute component to restrict access to authenticated users
+// Import CommissionerDashboard for /commissioner/:poolId
+const CommissionerDashboard = lazy(() =>
+  import("../pages/Commissioner/CommissionerDashboard")
+);
+
+/**
+ * Restrict access to authenticated users
+ */
 function ProtectedRoute({ element }) {
   const { user, authLoading } = useAuth();
   const [analytics, setAnalytics] = useState(null);
@@ -46,7 +54,8 @@ function ProtectedRoute({ element }) {
       }
 
       // Accessibility announcement
-      const announcement = "You are being redirected to the login page because you are not authenticated.";
+      const announcement =
+        "You are being redirected to the login page because you are not authenticated.";
       const liveRegion = document.createElement("div");
       liveRegion.setAttribute("aria-live", "assertive");
       liveRegion.setAttribute("role", "alert");
@@ -80,7 +89,9 @@ function ProtectedRoute({ element }) {
   return element;
 }
 
-// PublicRoute component to redirect authenticated users
+/**
+ * Redirect authenticated users away from login/signup pages
+ */
 function PublicRoute({ element }) {
   const { user, authLoading } = useAuth();
 
@@ -99,7 +110,9 @@ function PublicRoute({ element }) {
   return element;
 }
 
-// 404 NotFoundPage
+/**
+ * 404 Page
+ */
 function NotFoundPage() {
   const { user } = useAuth();
   const [analytics, setAnalytics] = useState(null);
@@ -123,7 +136,11 @@ function NotFoundPage() {
   }, [user?.uid, analytics]);
 
   return (
-    <Box sx={{ py: 4, textAlign: "center" }} role="alert" aria-label="Page not found">
+    <Box
+      sx={{ py: 4, textAlign: "center" }}
+      role="alert"
+      aria-label="Page not found"
+    >
       <Typography
         variant="h4"
         sx={{
@@ -181,7 +198,10 @@ function NotFoundPage() {
   );
 }
 
-function AppRoutes() {
+/**
+ * Main Application Routes
+ */
+export default function AppRoutes() {
   return (
     <Suspense
       fallback={
@@ -198,33 +218,49 @@ function AppRoutes() {
             <Route path="/login" element={<PublicRoute element={<LoginPage />} />} />
             <Route path="/signup" element={<PublicRoute element={<SignupPage />} />} />
             <Route path="/tos" element={<TOSPage />} />
-            <Route path="/subscription" element={<ProtectedRoute element={<SubscriptionPage />} />} />
+            <Route
+              path="/subscription"
+              element={<ProtectedRoute element={<SubscriptionPage />} />}
+            />
             <Route path="/join" element={<JoinPool />} />
 
-            {/* Pool List Route */}
+            {/* Pool List */}
             <Route path="/pools" element={<PoolList />} />
 
-            {/* Protected Routes */}
-            <Route path="/dashboard" element={<ProtectedRoute element={<Dashboard />} />} />
-            <Route path="/create-pool" element={<ProtectedRoute element={<CreatePoolWizard />} />} />
-            <Route path="/pool/:poolId" element={<ProtectedRoute element={<PoolDashboard />} />} />
+            {/* Protected Routes (must be authenticated) */}
+            <Route
+              path="/dashboard"
+              element={<ProtectedRoute element={<Dashboard />} />}
+            />
+            <Route
+              path="/create-pool"
+              element={<ProtectedRoute element={<CreatePoolWizard />} />}
+            />
 
-            {/* NEW: Commissioner Dashboard Route */}
+            {/* Single Pool View */}
+            <Route
+              path="/pool/:poolId"
+              element={<ProtectedRoute element={<PoolView />} />}
+            />
+
+            {/* Commissioner Dashboard */}
             <Route
               path="/commissioner/:poolId"
               element={<ProtectedRoute element={<CommissionerDashboard />} />}
             />
 
-            {/* 
-              Remove or comment out old references:
-              <Route path="/manage-pool/:poolId" element={<ProtectedRoute element={<ManagePool />} />} />
-              <Route path="/commissioner-settings/:poolId" element={<ProtectedRoute element={<CommissionerSettingsPage />} />} />
+            {/*
+              Old references to "PoolDashboard" or "ManagePool" or
+              "CommissionerSettingsPage" are removed.
             */}
 
             <Route path="/account" element={<ProtectedRoute element={<Account />} />} />
-            <Route path="/change-password" element={<ProtectedRoute element={<ChangePassword />} />} />
+            <Route
+              path="/change-password"
+              element={<ProtectedRoute element={<ChangePassword />} />}
+            />
 
-            {/* 404 Catch-All Route */}
+            {/* 404 Catch-All */}
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Box>
@@ -232,5 +268,3 @@ function AppRoutes() {
     </Suspense>
   );
 }
-
-export default AppRoutes;

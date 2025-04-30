@@ -1,49 +1,49 @@
-// /src/pages/Dashboard.js (UPDATED)
-import React, { useEffect, useState, useRef } from "react";
+// src/pages/Dashboard.js
+
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { useThemeContext } from "../contexts/ThemeContext";
 import { useSubscription } from "../contexts/SubscriptionContext";
+import { useThemeContext } from "../contexts/ThemeContext";
 import { getDb, getAnalyticsService } from "../firebase/config";
 import {
   collection,
   query,
   where,
-  onSnapshot,
   orderBy,
-  startAfter,
   limit,
+  onSnapshot,
   doc,
   getDoc,
+  startAfter,
 } from "firebase/firestore";
 import { logEvent } from "firebase/analytics";
-import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   Box,
   Container,
   Typography,
-  Link,
+  Button,
+  CircularProgress,
+  Alert,
+  Fade,
   Grid,
   Card,
   CardContent,
-  Alert,
-  CircularProgress,
-  Button,
-  Fade,
-  styled,
+  Link,
   Chip,
   Select,
   MenuItem,
   FormControl,
   InputLabel,
+  styled,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 
-// Styled components for polished UI
+// Styled components for a polished UI
 const DashboardContainer = styled(Box)(({ theme }) => ({
-  background:
-    theme.palette.mode === "dark"
-      ? "linear-gradient(180deg, #1A2A44 0%, #2A3B5A 100%)"
-      : "linear-gradient(180deg, #F5F5F5 0%, #E0E0E0 100%)",
+  background: theme.palette.mode === "dark"
+    ? "linear-gradient(180deg, #1A2A44 0%, #2A3B5A 100%)"
+    : "linear-gradient(180deg, #F5F5F5 0%, #E0E0E0 100%)",
   minHeight: "100vh",
   py: { xs: 6, md: 8 },
   px: { xs: 2, md: 4 },
@@ -104,19 +104,17 @@ const ManageLink = styled(Link)(({ theme }) => ({
   },
 }));
 
-// Page Size Constant
 const PAGE_SIZE = 10;
 
 function Dashboard() {
-  // ======== 1. All Hooks at the top (unconditional) ========
   const { user, authLoading } = useAuth();
   const { subscriptionTier } = useSubscription();
   const { mode } = useThemeContext();
+  const isDarkMode = mode === "dark";
   const navigate = useNavigate();
-
   const db = getDb();
-  const [analytics, setAnalytics] = useState(null);
 
+  // Local states
   const [myPools, setMyPools] = useState([]);
   const [filteredPools, setFilteredPools] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -127,8 +125,8 @@ function Dashboard() {
   const [lastDoc, setLastDoc] = useState({ commissioner: null, member: null });
   const [hasMore, setHasMore] = useState({ commissioner: true, member: true });
   const [poolCountAnnouncement, setPoolCountAnnouncement] = useState("");
+  const [analytics, setAnalytics] = useState(null);
 
-  // Refs for logging
   const hasLoggedPageView = useRef(false);
   const hasLoggedRefresh = useRef(false);
   const hasLoggedFilterChange = useRef(false);
@@ -139,17 +137,13 @@ function Dashboard() {
   const hasLoggedJoinPoolClick = useRef(false);
   const hasLoggedLoadMore = useRef(false);
 
-  const isDarkMode = mode === "dark";
-
-  // ======== 2. useEffect(s) also at top-level (unconditional) ========
-
-  // Initialize analytics
+  // Initialize Analytics
   useEffect(() => {
     const analyticsInstance = getAnalyticsService();
     setAnalytics(analyticsInstance);
   }, []);
 
-  // Track page view on mount
+  // Track page view
   useEffect(() => {
     if (!hasLoggedPageView.current && analytics) {
       logEvent(analytics, "dashboard_viewed", {
@@ -159,44 +153,22 @@ function Dashboard() {
       console.log("Dashboard - Page view logged to Firebase Analytics");
       hasLoggedPageView.current = true;
     }
-  }, [analytics, user?.uid]);
+  }, [user?.uid, analytics]);
 
-  // If user is not authenticated, redirect
+  // Fetch pools in real-time
   useEffect(() => {
-    if (authLoading) return; // wait for auth
+    if (authLoading) return;
     if (!user) {
       setLoading(false);
       navigate("/login");
+      return;
     }
-  }, [authLoading, user, navigate]);
 
-  // Primary fetch of commissioner + member pools (real-time updates)
-  useEffect(() => {
-    if (!user) return; // If user is missing, nothing to fetch
-
-    // Reset states before new fetch
-    setLoading(true);
-    setError("");
-    setMyPools([]);
-    setLastDoc({ commissioner: null, member: null });
-    setHasMore({ commissioner: true, member: true });
-
-    const userPoolsMap = {};
-    let pendingUpdates = 2; // We'll have 2 listeners: commissioner & member
-
-    const updatePoolList = () => {
-      pendingUpdates -= 1;
-      if (pendingUpdates === 0) {
-        const validPools = Object.values(userPoolsMap).filter((p) => p.id);
-        setMyPools(validPools);
-        setLoading(false);
-      }
-    };
-
-    // Setup queries
-    const poolsRef = collection(db, "pools");
     const userId = user.uid;
+    const poolsRef = collection(db, "pools");
+    const userPoolsMap = {}; // track all pools
 
+    // Queries for commissioner + member
     const baseQueryCommissioner = query(
       poolsRef,
       where("commissionerId", "==", userId),
@@ -210,17 +182,30 @@ function Dashboard() {
       limit(PAGE_SIZE)
     );
 
-    // Subscribe to commissioner pools
-    const unsubscribeComm = onSnapshot(
+    let pendingListeners = 2;
+
+    const handleUpdate = () => {
+      pendingListeners -= 1;
+      if (pendingListeners === 0) {
+        const validPools = Object.values(userPoolsMap).filter((pool) => pool.id);
+        setMyPools(validPools);
+        setLoading(false);
+      }
+    };
+
+    // Commissioner's Pools
+    const unsubCommissioner = onSnapshot(
       baseQueryCommissioner,
       (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          const poolDoc = change.doc;
-          if (change.type === "removed") {
-            delete userPoolsMap[poolDoc.id];
-          } else {
-            const poolData = poolDoc.data();
-            userPoolsMap[poolDoc.id] = { ...poolData, id: poolDoc.id };
+          if (change.type === "added" || change.type === "modified") {
+            const pData = change.doc.data();
+            const pid = change.doc.id;
+            if (pid && pData.createdAt) {
+              userPoolsMap[pid] = { ...pData, id: pid };
+            }
+          } else if (change.type === "removed") {
+            delete userPoolsMap[change.doc.id];
           }
         });
         if (snapshot.docs.length > 0) {
@@ -235,25 +220,30 @@ function Dashboard() {
         } else {
           setHasMore((prev) => ({ ...prev, commissioner: false }));
         }
-        updatePoolList();
+        handleUpdate();
       },
-      (err) => handleError(err, "Commissioner Pools Fetch")
+      (err) => {
+        console.error("Error fetching commissioner pools:", err);
+        setError("Failed to load pools. Please try again.");
+        setLoading(false);
+      }
     );
 
-    // Subscribe to member pools
-    const unsubscribeMember = onSnapshot(
+    // Member Pools
+    const unsubMember = onSnapshot(
       baseQueryMember,
       (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          const poolDoc = change.doc;
-          if (change.type === "removed") {
-            delete userPoolsMap[poolDoc.id];
-          } else {
-            const poolData = poolDoc.data();
-            // Only add if not already in userPoolsMap to avoid duplicates
-            if (!userPoolsMap[poolDoc.id]) {
-              userPoolsMap[poolDoc.id] = { ...poolData, id: poolDoc.id };
+          if (change.type === "added" || change.type === "modified") {
+            const pData = change.doc.data();
+            const pid = change.doc.id;
+            if (pid && pData.createdAt) {
+              if (!userPoolsMap[pid]) {
+                userPoolsMap[pid] = { ...pData, id: pid };
+              }
             }
+          } else if (change.type === "removed") {
+            delete userPoolsMap[change.doc.id];
           }
         });
         if (snapshot.docs.length > 0) {
@@ -268,75 +258,309 @@ function Dashboard() {
         } else {
           setHasMore((prev) => ({ ...prev, member: false }));
         }
-        updatePoolList();
+        handleUpdate();
       },
-      (err) => handleError(err, "Member Pools Fetch")
+      (err) => {
+        console.error("Error fetching member pools:", err);
+        setError("Failed to load pools. Please try again.");
+        setLoading(false);
+      }
     );
 
-    // Cleanup on unmount
     return () => {
-      unsubscribeComm();
-      unsubscribeMember();
+      if (unsubCommissioner) unsubCommissioner();
+      if (unsubMember) unsubMember();
     };
-  }, [user, db]);
+  }, [authLoading, user, navigate, db]);
 
-  // Filter & sort whenever myPools, filterRole, or sortBy changes
-  useEffect(() => {
-    let filtered = myPools;
+  // Load More
+  const loadMorePools = async () => {
+    setLoadingMore(true);
+    if (!user) return;
+    const userId = user.uid;
+    const userPoolsMap = {
+      ...myPools.reduce((map, pool) => ({ ...map, [pool.id]: pool }), {}),
+    };
+    let pendingFetches = (hasMore.commissioner ? 1 : 0) + (hasMore.member ? 1 : 0);
 
-    // Filter
-    if (filterRole === "commissioner") {
-      filtered = filtered.filter((p) => p.commissionerId === user?.uid);
-    } else if (filterRole === "member") {
-      filtered = filtered.filter(
-        (p) =>
-          p.commissionerId !== user?.uid &&
-          p.memberIds?.includes(user?.uid)
+    const finalizeUpdate = () => {
+      pendingFetches -= 1;
+      if (pendingFetches === 0) {
+        const updatedPools = Object.values(userPoolsMap);
+        setMyPools(updatedPools);
+        setLoadingMore(false);
+        setPoolCountAnnouncement(`Loaded ${updatedPools.length} pools`);
+      }
+    };
+
+    // Commissioner pools
+    if (hasMore.commissioner && lastDoc.commissioner) {
+      const qComm = query(
+        collection(db, "pools"),
+        where("commissionerId", "==", userId),
+        orderBy("createdAt", "desc"),
+        startAfter(lastDoc.commissioner),
+        limit(PAGE_SIZE)
+      );
+
+      onSnapshot(
+        qComm,
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === "added" || change.type === "modified") {
+              const pData = change.doc.data();
+              const pid = change.doc.id;
+              if (pid && pData.createdAt) {
+                userPoolsMap[pid] = { ...pData, id: pid };
+              }
+            } else if (change.type === "removed") {
+              delete userPoolsMap[change.doc.id];
+            }
+          });
+          if (snapshot.docs.length > 0) {
+            setLastDoc((prev) => ({
+              ...prev,
+              commissioner: snapshot.docs[snapshot.docs.length - 1],
+            }));
+            setHasMore((prev) => ({
+              ...prev,
+              commissioner: snapshot.docs.length === PAGE_SIZE,
+            }));
+          } else {
+            setHasMore((prev) => ({ ...prev, commissioner: false }));
+          }
+          finalizeUpdate();
+        },
+        (err) => {
+          console.error("Error loading more commissioner pools:", err);
+          setError("Failed to load more pools. Please try again.");
+          setLoadingMore(false);
+        }
       );
     }
 
-    // Sort
-    if (sortBy === "createdAt") {
-      filtered.sort((a, b) => {
-        const aSecs = a.createdAt?.seconds || 0;
-        const bSecs = b.createdAt?.seconds || 0;
-        return bSecs - aSecs;
-      });
-    } else if (sortBy === "name") {
-      filtered.sort((a, b) =>
-        (a.poolName || "").localeCompare(b.poolName || "")
+    // Member pools
+    if (hasMore.member && lastDoc.member) {
+      const qMember = query(
+        collection(db, "pools"),
+        where("memberIds", "array-contains", userId),
+        orderBy("createdAt", "desc"),
+        startAfter(lastDoc.member),
+        limit(PAGE_SIZE)
       );
+
+      onSnapshot(
+        qMember,
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === "added" || change.type === "modified") {
+              const pData = change.doc.data();
+              const pid = change.doc.id;
+              if (pid && pData.createdAt) {
+                userPoolsMap[pid] = { ...pData, id: pid };
+              }
+            } else if (change.type === "removed") {
+              delete userPoolsMap[change.doc.id];
+            }
+          });
+          if (snapshot.docs.length > 0) {
+            setLastDoc((prev) => ({
+              ...prev,
+              member: snapshot.docs[snapshot.docs.length - 1],
+            }));
+            setHasMore((prev) => ({
+              ...prev,
+              member: snapshot.docs.length === PAGE_SIZE,
+            }));
+          } else {
+            setHasMore((prev) => ({ ...prev, member: false }));
+          }
+          finalizeUpdate();
+        },
+        (err) => {
+          console.error("Error loading more member pools:", err);
+          setError("Failed to load more pools. Please try again.");
+          setLoadingMore(false);
+        }
+      );
+    }
+
+    if (!hasLoggedLoadMore.current && analytics) {
+      logEvent(analytics, "load_more_clicked", {
+        userId: user?.uid || "anonymous",
+        timestamp: new Date().toISOString(),
+      });
+      console.log("Dashboard - Load more click logged to Firebase Analytics");
+      hasLoggedLoadMore.current = true;
+    }
+  };
+
+  // Filter + sort
+  useEffect(() => {
+    let filtered = myPools;
+    if (filterRole === "commissioner") {
+      filtered = filtered.filter((pool) => pool.commissionerId === user?.uid);
+    } else if (filterRole === "member") {
+      filtered = filtered.filter((pool) => pool.commissionerId !== user?.uid && pool.memberIds?.includes(user?.uid));
+    }
+
+    if (sortBy === "createdAt") {
+      filtered.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    } else if (sortBy === "name") {
+      filtered.sort((a, b) => (a.poolName || "").localeCompare(b.poolName || ""));
     }
 
     setFilteredPools(filtered);
-  }, [myPools, filterRole, sortBy, user?.uid]);
+  }, [myPools, filterRole, sortBy, user]);
 
-  // Reset analytics flags if user changes
-  useEffect(() => {
-    hasLoggedPageView.current = false;
-    hasLoggedRefresh.current = false;
-    hasLoggedFilterChange.current = false;
-    hasLoggedSortChange.current = false;
-    hasLoggedPoolCardClick.current = {};
-    hasLoggedManagePoolClick.current = {};
-    hasLoggedCreatePoolClick.current = false;
-    hasLoggedJoinPoolClick.current = false;
-    hasLoggedLoadMore.current = false;
-  }, [user?.uid]);
+  // Handle refresh
+  const handleRefresh = () => {
+    setLoading(true);
+    setError("");
+    setMyPools([]);
+    setLastDoc({ commissioner: null, member: null });
+    setHasMore({ commissioner: true, member: true });
+    if (!hasLoggedRefresh.current && analytics) {
+      logEvent(analytics, "dashboard_refreshed", {
+        userId: user?.uid || "anonymous",
+        timestamp: new Date().toISOString(),
+      });
+      console.log("Dashboard - Refresh logged to Firebase Analytics");
+      hasLoggedRefresh.current = true;
+    }
+  };
 
-  // ======== 3. Now we do our conditional returns, which do NOT call new Hooks ========
+  // Handle filter change
+  const handleFilterChange = (e) => {
+    setFilterRole(e.target.value);
+    if (!hasLoggedFilterChange.current && analytics) {
+      logEvent(analytics, "dashboard_filter_changed", {
+        userId: user?.uid || "anonymous",
+        filterRole: e.target.value,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("Dashboard - Filter role changed logged to Firebase Analytics");
+      hasLoggedFilterChange.current = true;
+    }
+  };
 
-  // Show loading state if we're waiting for pools (and user is indeed logged in)
+  // Handle sort change
+  const handleSortChange = (e) => {
+    setSortBy(e.target.value);
+    if (!hasLoggedSortChange.current && analytics) {
+      logEvent(analytics, "dashboard_sort_changed", {
+        userId: user?.uid || "anonymous",
+        sortBy: e.target.value,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("Dashboard - Sort by changed logged to Firebase Analytics");
+      hasLoggedSortChange.current = true;
+    }
+  };
+
+  // Validate pool existence before navigating
+  const validatePoolAndNavigate = async (poolId, destination, analyticsEventName, logRef) => {
+    try {
+      const poolRef = doc(db, "pools", poolId);
+      const poolSnap = await getDoc(poolRef);
+      if (!poolSnap.exists()) {
+        setError(`Pool with ID ${poolId} does not exist or was deleted.`);
+        setMyPools((prev) => prev.filter((p) => p.id !== poolId));
+        return;
+      }
+      // Navigate if valid
+      navigate(destination);
+
+      if (!logRef.current[poolId] && analytics) {
+        logEvent(analytics, analyticsEventName, {
+          userId: user?.uid || "anonymous",
+          poolId,
+          timestamp: new Date().toISOString(),
+        });
+        console.log(`Dashboard - ${analyticsEventName} for pool ${poolId} logged to Firebase Analytics`);
+        logRef.current[poolId] = true;
+      }
+    } catch (err) {
+      console.error(`Error validating pool for ${analyticsEventName}:`, err);
+      setError("Failed to validate pool. Please try again.");
+      if (analytics) {
+        logEvent(analytics, `${analyticsEventName}_failed`, {
+          userId: user?.uid || "anonymous",
+          poolId,
+          error_message: err.message || "Unknown error",
+          timestamp: new Date().toISOString(),
+        });
+        console.log(`Dashboard - ${analyticsEventName} failure logged to Firebase Analytics`);
+      }
+    }
+  };
+
+  // Handle pool card click
+  const handlePoolClick = (poolId) => {
+    validatePoolAndNavigate(poolId, `/pool/${poolId}`, "pool_card_clicked", hasLoggedPoolCardClick);
+  };
+
+  // Manage pool click => Commissioner route: /commissioner/:poolId
+  const handleManagePoolClick = (poolId) => {
+    validatePoolAndNavigate(poolId, `/commissioner/${poolId}`, "manage_pool_card_clicked", hasLoggedManagePoolClick);
+  };
+
+  // Create pool click
+  const handleCreatePoolClick = () => {
+    if (!hasLoggedCreatePoolClick.current && analytics) {
+      logEvent(analytics, "create_pool_clicked", {
+        userId: user?.uid || "anonymous",
+        timestamp: new Date().toISOString(),
+      });
+      console.log("Dashboard - Create pool click logged to Firebase Analytics");
+      hasLoggedCreatePoolClick.current = true;
+    }
+  };
+
+  // Join pool click
+  const handleJoinPoolClick = () => {
+    if (!hasLoggedJoinPoolClick.current && analytics) {
+      logEvent(analytics, "join_pool_clicked", {
+        userId: user?.uid || "anonymous",
+        timestamp: new Date().toISOString(),
+      });
+      console.log("Dashboard - Join pool click logged to Firebase Analytics");
+      hasLoggedJoinPoolClick.current = true;
+    }
+  };
+
+  // Return while auth loading
+  if (authLoading) {
+    return (
+      <DashboardContainer>
+        <Container maxWidth="lg">
+          <Fade in timeout={1000}>
+            <Box sx={{ textAlign: "center", py: 4 }}>
+              <CircularProgress sx={{ color: "#FFD700", mb: 2 }} aria-label="Loading authentication state" />
+              <Typography
+                variant="body1"
+                sx={{
+                  mb: 2,
+                  fontFamily: "'Poppins', sans-serif'",
+                  color: isDarkMode ? "#B0BEC5" : "#555555",
+                }}
+              >
+                Loading authentication state...
+              </Typography>
+            </Box>
+          </Fade>
+        </Container>
+      </DashboardContainer>
+    );
+  }
+
   if (loading) {
     return (
       <DashboardContainer>
         <Container maxWidth="lg">
           <Fade in timeout={1000}>
             <Box sx={{ textAlign: "center", py: 4 }}>
-              <CircularProgress
-                sx={{ color: "#FFD700", mb: 2 }}
-                aria-label="Loading pools"
-              />
+              <CircularProgress sx={{ color: "#FFD700", mb: 2 }} aria-label="Loading pools" />
               <Typography
                 variant="body1"
                 sx={{
@@ -354,19 +578,13 @@ function Dashboard() {
     );
   }
 
-  // Show error message if something went wrong
   if (error) {
     return (
       <DashboardContainer>
         <Container maxWidth="lg">
           <Fade in timeout={1000}>
             <Box sx={{ py: 4 }}>
-              <Alert
-                severity="error"
-                sx={{ mb: 2, borderRadius: 2 }}
-                role="alert"
-                aria-live="assertive"
-              >
+              <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }} role="alert" aria-live="assertive">
                 {error}
                 <Button
                   onClick={handleRefresh}
@@ -384,23 +602,13 @@ function Dashboard() {
     );
   }
 
-  // ======== 4. Render the main dashboard UI ========
   return (
     <DashboardContainer>
       <Container maxWidth="lg">
         <Fade in timeout={1000}>
           <Box sx={{ py: 4 }}>
-            {/* Header section: Title, filter, sort, create/join, refresh */}
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                mb: 4,
-                flexWrap: "wrap",
-                gap: 2,
-              }}
-            >
+            {/* Header Row */}
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 4, flexWrap: "wrap", gap: 2 }}>
               <Typography
                 variant="h4"
                 sx={{
@@ -411,15 +619,9 @@ function Dashboard() {
               >
                 My Pools
               </Typography>
-
               <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                 <FormControl sx={{ minWidth: 120 }}>
-                  <InputLabel
-                    sx={{ fontFamily: "'Poppins', sans-serif'" }}
-                    id="filter-role-label"
-                  >
-                    Filter Role
-                  </InputLabel>
+                  <InputLabel sx={{ fontFamily: "'Poppins', sans-serif'" }} id="filter-role-label">Filter Role</InputLabel>
                   <Select
                     labelId="filter-role-label"
                     value={filterRole}
@@ -428,34 +630,14 @@ function Dashboard() {
                     aria-label="Filter pools by role"
                     aria-describedby="filter-role-label"
                   >
-                    <MenuItem
-                      value="all"
-                      sx={{ fontFamily: "'Poppins', sans-serif'" }}
-                    >
-                      All
-                    </MenuItem>
-                    <MenuItem
-                      value="commissioner"
-                      sx={{ fontFamily: "'Poppins', sans-serif'" }}
-                    >
-                      Commissioner
-                    </MenuItem>
-                    <MenuItem
-                      value="member"
-                      sx={{ fontFamily: "'Poppins', sans-serif'" }}
-                    >
-                      Member
-                    </MenuItem>
+                    <MenuItem value="all" sx={{ fontFamily: "'Poppins', sans-serif'" }}>All</MenuItem>
+                    <MenuItem value="commissioner" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Commissioner</MenuItem>
+                    <MenuItem value="member" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Member</MenuItem>
                   </Select>
                 </FormControl>
 
                 <FormControl sx={{ minWidth: 120 }}>
-                  <InputLabel
-                    sx={{ fontFamily: "'Poppins', sans-serif'" }}
-                    id="sort-by-label"
-                  >
-                    Sort By
-                  </InputLabel>
+                  <InputLabel sx={{ fontFamily: "'Poppins', sans-serif'" }} id="sort-by-label">Sort By</InputLabel>
                   <Select
                     labelId="sort-by-label"
                     value={sortBy}
@@ -464,18 +646,8 @@ function Dashboard() {
                     aria-label="Sort pools"
                     aria-describedby="sort-by-label"
                   >
-                    <MenuItem
-                      value="createdAt"
-                      sx={{ fontFamily: "'Poppins', sans-serif'" }}
-                    >
-                      Created Date
-                    </MenuItem>
-                    <MenuItem
-                      value="name"
-                      sx={{ fontFamily: "'Poppins', sans-serif'" }}
-                    >
-                      Pool Name
-                    </MenuItem>
+                    <MenuItem value="createdAt" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Created Date</MenuItem>
+                    <MenuItem value="name" sx={{ fontFamily: "'Poppins', sans-serif'" }}>Pool Name</MenuItem>
                   </Select>
                 </FormControl>
 
@@ -486,7 +658,6 @@ function Dashboard() {
                 >
                   Refresh
                 </StyledButton>
-
                 <StyledButton
                   component={RouterLink}
                   to="/create-pool"
@@ -506,7 +677,7 @@ function Dashboard() {
               </Box>
             </Box>
 
-            {/* If no pools after filtering */}
+            {/* Pools Display */}
             {filteredPools.length === 0 ? (
               <Box sx={{ textAlign: "center" }}>
                 <Typography
@@ -525,14 +696,7 @@ function Dashboard() {
                     : "pools where you are a member"}{" "}
                   yet! Create one now or join an existing pool.
                 </Typography>
-                <Box
-                  sx={{
-                    display: "flex",
-                    justifyContent: "center",
-                    gap: 2,
-                    flexWrap: "wrap",
-                  }}
-                >
+                <Box sx={{ display: "flex", justifyContent: "center", gap: 2, flexWrap: "wrap" }}>
                   <StyledButton
                     component={RouterLink}
                     to="/create-pool"
@@ -553,14 +717,12 @@ function Dashboard() {
               </Box>
             ) : (
               <>
-                {/* Pools Grid */}
                 <Grid container spacing={3}>
                   {filteredPools.map((pool) => {
                     const isRecent =
                       pool.createdAt?.toDate &&
-                      new Date() - pool.createdAt.toDate() <
-                        7 * 24 * 60 * 60 * 1000;
-                    const isCommissioner = pool.commissionerId === user?.uid;
+                      new Date() - pool.createdAt.toDate() < 7 * 24 * 60 * 60 * 1000;
+                    const isCommish = pool.commissionerId === user?.uid;
 
                     return (
                       <Grid item xs={12} sm={6} md={4} key={pool.id}>
@@ -598,7 +760,6 @@ function Dashboard() {
                                   />
                                 )}
                               </Box>
-
                               <Typography
                                 variant="body2"
                                 sx={{
@@ -607,10 +768,8 @@ function Dashboard() {
                                   color: isDarkMode ? "#B0BEC5" : "#555555",
                                 }}
                               >
-                                {pool.sport || "N/A"} /{" "}
-                                {pool.formatName || pool.format || "N/A"}
+                                {pool.sport || "N/A"} / {pool.formatName || pool.format || "N/A"}
                               </Typography>
-
                               <Box
                                 sx={{
                                   display: "flex",
@@ -639,31 +798,24 @@ function Dashboard() {
                                       : "default"
                                   }
                                   sx={{ fontFamily: "'Poppins', sans-serif'" }}
-                                  aria-label={`Pool status: ${
-                                    pool.status || "N/A"
-                                  }`}
+                                  aria-label={`Pool status: ${pool.status || "N/A"}`}
                                 />
                               </Box>
-
-                              <Box
-                                sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}
-                              >
+                              <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                                 <ViewLink
                                   component="button"
                                   onClick={() => handlePoolClick(pool.id)}
-                                  aria-label={`View pool ${
-                                    pool.poolName || "Untitled Pool"
-                                  }`}
+                                  aria-label={`View pool ${pool.poolName || "Untitled Pool"}`}
                                 >
                                   View Pool
                                 </ViewLink>
-                                {isCommissioner && (
+
+                                {/* Only show Manage link if current user is the commissioner */}
+                                {isCommish && (
                                   <ManageLink
                                     component="button"
                                     onClick={() => handleManagePoolClick(pool.id)}
-                                    aria-label={`Manage pool ${
-                                      pool.poolName || "Untitled Pool"
-                                    }`}
+                                    aria-label={`Manage pool ${pool.poolName || "Untitled Pool"}`}
                                   >
                                     Manage Pool
                                   </ManageLink>
@@ -677,15 +829,12 @@ function Dashboard() {
                   })}
                 </Grid>
 
-                {/* Load More button if we still have more commissioner or member pools to fetch */}
                 {(hasMore.commissioner || hasMore.member) && (
                   <Box sx={{ textAlign: "center", mt: 4 }}>
                     <StyledButton
                       onClick={loadMorePools}
                       disabled={loadingMore}
-                      aria-label={
-                        loadingMore ? "Loading more pools" : "Load more pools"
-                      }
+                      aria-label={loadingMore ? "Loading more pools" : "Load more pools"}
                     >
                       {loadingMore ? "Loading..." : "Load More"}
                     </StyledButton>
@@ -710,315 +859,6 @@ function Dashboard() {
       </Container>
     </DashboardContainer>
   );
-
-  // ======== 5. Implementation details of smaller functions below the return ========
-  // e.g. handleError, handleRefresh, handlePoolClick, etc. can be placed above or below
-  // but just ensure they're not "inside" any conditional blocks.
-
-  /**
-   * We keep them inside the component (like you did) but outside the return. 
-   * Alternatively, you could define them above. Just keep them at top-level.
-   */
-  function handleError(err, operation) {
-    console.error(`${operation} Error:`, err);
-    let userFriendlyError = "Failed to load pools. Please try again.";
-    if (err.code === "permission-denied") {
-      userFriendlyError = "You do not have permission to view pools.";
-    } else if (err.code === "unavailable") {
-      userFriendlyError = "Firestore is currently unavailable. Please try again later.";
-    }
-    setError(userFriendlyError);
-    setLoading(false);
-    if (analytics) {
-      logEvent(analytics, "pools_fetch_failed", {
-        userId: user?.uid || "anonymous",
-        error_message: userFriendlyError,
-        timestamp: new Date().toISOString(),
-      });
-      console.log("Dashboard - Pools fetch failure logged to Firebase Analytics");
-    }
-  }
-
-  async function withRetry(operation, callback, maxRetries = 3, retryDelayBase = 1000) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await callback();
-      } catch (error) {
-        if (analytics) {
-          logEvent(analytics, "firebase_operation_retry", {
-            userId: user?.uid || "anonymous",
-            operation,
-            attempt,
-            error_message: error.message,
-            timestamp: new Date().toISOString(),
-          });
-          console.log(
-            `Dashboard - ${operation} retry attempt ${attempt} logged to Firebase Analytics`
-          );
-        }
-        if (attempt === maxRetries) {
-          throw error;
-        }
-        const delay = Math.pow(2, attempt - 1) * retryDelayBase;
-        console.log(
-          `${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
-  }
-
-  async function loadMorePools() {
-    setLoadingMore(true);
-    const userPoolsMap = myPools.reduce((map, p) => ({ ...map, [p.id]: p }), {});
-    let pendingUpdates = 0;
-
-    // If we can fetch more commissioner
-    if (hasMore.commissioner) {
-      pendingUpdates++;
-      const qCommissioner = query(
-        collection(db, "pools"),
-        where("commissionerId", "==", user.uid),
-        orderBy("createdAt", "desc"),
-        startAfter(lastDoc.commissioner),
-        limit(PAGE_SIZE)
-      );
-
-      withRetry("Load More Commissioner Pools", () =>
-        onSnapshot(qCommissioner, (snapshot) => {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type === "removed") {
-              delete userPoolsMap[change.doc.id];
-            } else {
-              userPoolsMap[change.doc.id] = {
-                ...change.doc.data(),
-                id: change.doc.id,
-              };
-            }
-          });
-          if (snapshot.docs.length > 0) {
-            setLastDoc((prev) => ({
-              ...prev,
-              commissioner: snapshot.docs[snapshot.docs.length - 1],
-            }));
-            setHasMore((prev) => ({
-              ...prev,
-              commissioner: snapshot.docs.length === PAGE_SIZE,
-            }));
-          } else {
-            setHasMore((prev) => ({ ...prev, commissioner: false }));
-          }
-          finalizeLoad();
-        })
-      );
-    }
-
-    // If we can fetch more member
-    if (hasMore.member) {
-      pendingUpdates++;
-      const qMember = query(
-        collection(db, "pools"),
-        where("memberIds", "array-contains", user.uid),
-        orderBy("createdAt", "desc"),
-        startAfter(lastDoc.member),
-        limit(PAGE_SIZE)
-      );
-
-      withRetry("Load More Member Pools", () =>
-        onSnapshot(qMember, (snapshot) => {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type === "removed") {
-              delete userPoolsMap[change.doc.id];
-            } else {
-              // Add only if not present
-              if (!userPoolsMap[change.doc.id]) {
-                userPoolsMap[change.doc.id] = {
-                  ...change.doc.data(),
-                  id: change.doc.id,
-                };
-              }
-            }
-          });
-          if (snapshot.docs.length > 0) {
-            setLastDoc((prev) => ({
-              ...prev,
-              member: snapshot.docs[snapshot.docs.length - 1],
-            }));
-            setHasMore((prev) => ({
-              ...prev,
-              member: snapshot.docs.length === PAGE_SIZE,
-            }));
-          } else {
-            setHasMore((prev) => ({ ...prev, member: false }));
-          }
-          finalizeLoad();
-        })
-      );
-    }
-
-    // If there's no more to fetch from either commissioner or member,
-    // we can finalize immediately:
-    if (pendingUpdates === 0) {
-      finalizeLoad();
-    }
-
-    // Helper to unify finishing logic
-    function finalizeLoad() {
-      pendingUpdates--;
-      if (pendingUpdates <= 0) {
-        const updatedPools = Object.values(userPoolsMap);
-        setMyPools(updatedPools);
-        setLoadingMore(false);
-        setPoolCountAnnouncement(`Loaded ${updatedPools.length} pools`);
-
-        if (!hasLoggedLoadMore.current && analytics) {
-          logEvent(analytics, "load_more_clicked", {
-            userId: user?.uid || "anonymous",
-            timestamp: new Date().toISOString(),
-          });
-          console.log("Dashboard - Load more click logged to Firebase Analytics");
-          hasLoggedLoadMore.current = true;
-        }
-      }
-    }
-  }
-
-  function handleRefresh() {
-    setLoading(true);
-    setError("");
-    setMyPools([]);
-    setLastDoc({ commissioner: null, member: null });
-    setHasMore({ commissioner: true, member: true });
-
-    if (!hasLoggedRefresh.current && analytics) {
-      logEvent(analytics, "dashboard_refreshed", {
-        userId: user?.uid || "anonymous",
-        timestamp: new Date().toISOString(),
-      });
-      console.log("Dashboard - Refresh logged to Firebase Analytics");
-      hasLoggedRefresh.current = true;
-    }
-  }
-
-  function handleFilterChange(e) {
-    setFilterRole(e.target.value);
-    if (!hasLoggedFilterChange.current && analytics) {
-      logEvent(analytics, "dashboard_filter_changed", {
-        userId: user?.uid || "anonymous",
-        filterRole: e.target.value,
-        timestamp: new Date().toISOString(),
-      });
-      console.log("Dashboard - Filter role changed logged to Firebase Analytics");
-      hasLoggedFilterChange.current = true;
-    }
-  }
-
-  function handleSortChange(e) {
-    setSortBy(e.target.value);
-    if (!hasLoggedSortChange.current && analytics) {
-      logEvent(analytics, "dashboard_sort_changed", {
-        userId: user?.uid || "anonymous",
-        sortBy: e.target.value,
-        timestamp: new Date().toISOString(),
-      });
-      console.log("Dashboard - Sort by changed logged to Firebase Analytics");
-      hasLoggedSortChange.current = true;
-    }
-  }
-
-  async function handlePoolClick(poolId) {
-    try {
-      const poolRef = doc(db, "pools", poolId);
-      const poolSnap = await getDoc(poolRef);
-      if (!poolSnap.exists()) {
-        setError(`Pool with ID ${poolId} does not exist. It may have been deleted.`);
-        setMyPools((prev) => prev.filter((p) => p.id !== poolId));
-        return;
-      }
-      navigate(`/pool/${poolId}`);
-      if (!hasLoggedPoolCardClick.current[poolId] && analytics) {
-        logEvent(analytics, "pool_card_clicked", {
-          userId: user?.uid || "anonymous",
-          poolId,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("Dashboard - Pool card click logged to Firebase Analytics");
-        hasLoggedPoolCardClick.current[poolId] = true;
-      }
-    } catch (err) {
-      console.error("Error validating pool:", err);
-      setError("Failed to validate pool. Please try again.");
-      if (analytics) {
-        logEvent(analytics, "pool_card_click_failed", {
-          userId: user?.uid || "anonymous",
-          poolId,
-          error_message: err.message || "Unknown error",
-          timestamp: new Date().toISOString(),
-        });
-        console.log("Dashboard - Pool card click failure logged to Firebase Analytics");
-      }
-    }
-  }
-
-  async function handleManagePoolClick(poolId) {
-    try {
-      const poolRef = doc(db, "pools", poolId);
-      const poolSnap = await getDoc(poolRef);
-      if (!poolSnap.exists()) {
-        setError(`Pool with ID ${poolId} does not exist. It may have been deleted.`);
-        setMyPools((prev) => prev.filter((p) => p.id !== poolId));
-        return;
-      }
-      // If you'd prefer the new "/commissioner/:poolId" route:
-      // navigate(`/commissioner/${poolId}`);
-      // Or if your old route is "/manage-pool/:poolId", do that:
-      navigate(`/manage-pool/${poolId}`);
-
-      if (!hasLoggedManagePoolClick.current[poolId] && analytics) {
-        logEvent(analytics, "manage_pool_card_clicked", {
-          userId: user?.uid || "anonymous",
-          poolId,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("Dashboard - Manage pool card click logged to Firebase Analytics");
-        hasLoggedManagePoolClick.current[poolId] = true;
-      }
-    } catch (err) {
-      console.error("Error validating pool for management:", err);
-      setError("Failed to validate pool for management. Please try again.");
-      if (analytics) {
-        logEvent(analytics, "manage_pool_card_click_failed", {
-          userId: user?.uid || "anonymous",
-          poolId,
-          error_message: err.message || "Unknown error",
-          timestamp: new Date().toISOString(),
-        });
-        console.log("Dashboard - Manage pool card click failure logged to Firebase Analytics");
-      }
-    }
-  }
-
-  function handleCreatePoolClick() {
-    if (!hasLoggedCreatePoolClick.current && analytics) {
-      logEvent(analytics, "create_pool_clicked", {
-        userId: user?.uid || "anonymous",
-        timestamp: new Date().toISOString(),
-      });
-      console.log("Dashboard - Create pool click logged to Firebase Analytics");
-      hasLoggedCreatePoolClick.current = true;
-    }
-  }
-
-  function handleJoinPoolClick() {
-    if (!hasLoggedJoinPoolClick.current && analytics) {
-      logEvent(analytics, "join_pool_clicked", {
-        userId: user?.uid || "anonymous",
-        timestamp: new Date().toISOString(),
-      });
-      console.log("Dashboard - Join pool click logged to Firebase Analytics");
-      hasLoggedJoinPoolClick.current = true;
-    }
-  }
 }
 
 export default Dashboard;
