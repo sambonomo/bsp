@@ -1,7 +1,7 @@
 // /src/pages/Commissioner/CommissionerDashboard.js
 
 import React, { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom"; 
+import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { getDb, getAnalyticsService } from "../../firebase/config";
 import { logEvent } from "firebase/analytics";
@@ -13,46 +13,48 @@ import {
   CircularProgress,
   Fade,
   Alert,
-  Button
+  Button,
 } from "@mui/material";
 
-// Import the sections we built:
+// Sections
 import CommissionerPotSection from "./sections/CommissionerPotSection";
 import CommissionerRulesSection from "./sections/CommissionerRulesSection";
 import CommissionerBrandingSection from "./sections/CommissionerBrandingSection";
 import CommissionerMatchupsSection from "./sections/CommissionerMatchupsSection";
 import CommissionerExtraToolsSection from "./sections/CommissionerExtraToolsSection";
 
+// If you have an AuthContext, you could import it here:
+// import { useAuth } from "../../contexts/AuthContext";
+
 /**
- * The main "Manage Pool" page for commissioners.
+ * Main "Manage Pool" page for commissioners.
  * - Fetches the pool doc by poolId
- * - Renders sub-sections for pot, rules, branding, matchups, plus extra tools (offline users, lock pool, etc.).
+ * - Renders sub-sections for pot, rules, branding, matchups, plus extra tools (offline users, lock pool, etc.)
  */
 export default function CommissionerDashboard() {
-  // If your route is /commissioner/:poolId
+  // 1) Gather route params & nav
   const { poolId } = useParams();
   const navigate = useNavigate();
 
-  // If you have AuthContext, you might do something like:
-  // const { user } = useAuth();
-  // For this example, a placeholder user:
+  // 2) If you have AuthContext, you can do: const { user } = useAuth();
+  // For example, here's a placeholder user:
   const user = { uid: "dummyUid" };
 
+  // 3) Declare all Hooks at the top
   const [poolData, setPoolData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Analytics
   const [analytics, setAnalytics] = useState(null);
   const hasLoggedPageView = useRef(false);
 
-  // 1) Initialize analytics
+  // 4) Initialize analytics once
   useEffect(() => {
     const analyticsInstance = getAnalyticsService();
     setAnalytics(analyticsInstance);
   }, []);
 
-  // 2) Fetch the pool doc from Firestore
+  // 5) Fetch the pool doc from Firestore
   useEffect(() => {
     if (!poolId) {
       setError("No poolId provided.");
@@ -75,7 +77,7 @@ export default function CommissionerDashboard() {
         const data = snapshot.data();
         setPoolData(data);
 
-        // Log page view once
+        // Log a page view once
         if (!hasLoggedPageView.current && analytics) {
           logEvent(analytics, "commissioner_dashboard_viewed", {
             userId: user?.uid || "anonymous",
@@ -95,7 +97,7 @@ export default function CommissionerDashboard() {
     fetchPool();
   }, [poolId, analytics, user?.uid]);
 
-  // 3) If loading, show a spinner
+  // 6) Show loading spinner
   if (loading) {
     return (
       <Container maxWidth="md" sx={{ mt: 4, textAlign: "center" }}>
@@ -107,7 +109,7 @@ export default function CommissionerDashboard() {
     );
   }
 
-  // 4) If error, display it + maybe a back button
+  // 7) If there's an error, show it
   if (error) {
     return (
       <Container maxWidth="md" sx={{ mt: 4 }}>
@@ -116,7 +118,7 @@ export default function CommissionerDashboard() {
         </Alert>
         <Button
           variant="contained"
-          onClick={() => navigate("/dashboard")} // or wherever you want
+          onClick={() => navigate("/dashboard")}
           aria-label="Return to dashboard"
         >
           Return to Dashboard
@@ -125,7 +127,7 @@ export default function CommissionerDashboard() {
     );
   }
 
-  // 5) Check if user is the commissioner
+  // 8) Check if user is commissioner
   const isCommissioner = poolData?.commissionerId === user?.uid;
   if (!isCommissioner) {
     return (
@@ -137,7 +139,7 @@ export default function CommissionerDashboard() {
     );
   }
 
-  // 6) Render sub-sections
+  // 9) Render sub-sections
   return (
     <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
       <Fade in timeout={1000}>
@@ -185,8 +187,7 @@ export default function CommissionerDashboard() {
             analytics={analytics}
           />
 
-          {/* Section 5: Extra Tools (offline users, lock pool, start date, grid size, etc.) */}
-          {/* (Only if you created CommissionerExtraToolsSection) */}
+          {/* Section 5: Extra Tools (offline users, lock pool, etc.) */}
           <CommissionerExtraToolsSection
             user={user}
             poolId={poolId}

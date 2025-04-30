@@ -37,6 +37,7 @@ import { shuffleArray } from "../../../utils/helpers";
  * - analytics: optional analytics instance
  */
 export default function CommissionerExtraToolsSection({ user, poolId, poolData, analytics }) {
+  // 1) Declare all Hooks at top level.
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -51,18 +52,20 @@ export default function CommissionerExtraToolsSection({ user, poolId, poolData, 
   const [gridSize, setGridSize] = useState(poolData?.gridSize || 100);
   const [savingSpecial, setSavingSpecial] = useState(false);
 
-  // Check if user is commissioner
-  const isCommissioner = poolData?.commissionerId === user?.uid;
-  if (!isCommissioner) {
-    return null;
-  }
-
+  // Access Firestore
   const db = getDb();
 
+  // Reset messages when the pool changes
   useEffect(() => {
     setError("");
     setSuccessMessage("");
   }, [poolId]);
+
+  // 2) Check if user is commissioner (AFTER we have defined hooks).
+  const isCommissioner = poolData?.commissionerId === user?.uid;
+  if (!isCommissioner) {
+    return null;
+  }
 
   /**
    * handleAddOfflineUser:
@@ -133,7 +136,7 @@ export default function CommissionerExtraToolsSection({ user, poolId, poolData, 
 
       // Example: if squares and digits not assigned, do it now
       if (poolData.format === "squares" && !poolData.axisNumbers) {
-        const digits = [0,1,2,3,4,5,6,7,8,9];
+        const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         updates.axisNumbers = {
           x: shuffleArray(digits.slice()),
           y: shuffleArray(digits.slice()),
@@ -142,7 +145,7 @@ export default function CommissionerExtraToolsSection({ user, poolId, poolData, 
 
       // Example: if strip_cards and numbers not assigned, do it now
       if (poolData.format === "strip_cards" && !poolData.stripNumbers) {
-        const digits = [0,1,2,3,4,5,6,7,8,9];
+        const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         updates.stripNumbers = shuffleArray(digits);
       }
 
@@ -189,7 +192,7 @@ export default function CommissionerExtraToolsSection({ user, poolId, poolData, 
       // For demonstration, let’s store as string:
       updates.startDate = startDate || "";
 
-      // gridSize is an int for squares or something
+      // gridSize is an integer for squares or something
       updates.gridSize = parseInt(gridSize, 10);
 
       await updateDoc(poolRef, updates);

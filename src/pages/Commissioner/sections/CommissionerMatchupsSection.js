@@ -6,7 +6,7 @@ import {
   onSnapshot,
   addDoc,
   deleteDoc,
-  doc
+  doc,
 } from "firebase/firestore";
 import {
   Card,
@@ -21,58 +21,51 @@ import {
   Alert,
   CircularProgress,
   Box,
-  Snackbar
+  Snackbar,
 } from "@mui/material";
 
 import { getDb } from "../../../firebase/config";
 import { logEvent } from "firebase/analytics";
-
-// A helper to fetch upcoming games (like from Sportradar)
 import { fetchSchedule } from "../../../utils/sportsRadar";
 
 /**
  * CommissionerMatchupsSection:
  * Lets the commissioner:
- * - Fetch & list upcoming games from a sports schedule
- * - Add them as matchups into Firestore sub-collection `/pools/{poolId}/matchups`
- * - Also lists existing matchups & optionally allows removing them
+ *  - Fetch & list upcoming games (via `fetchSchedule`)
+ *  - Add them as matchups in Firestore (/pools/{poolId}/matchups)
+ *  - Show existing matchups in the pool, allowing removal
  *
  * Props:
- * - user: current user
- * - poolId: Firestore doc ID
- * - poolData: the pool object
- * - analytics: optional analytics instance
+ *  - user: current user object
+ *  - poolId: Firestore document ID for the pool
+ *  - poolData: the pool object (including .commissionerId, .sport, .season, etc.)
+ *  - analytics: optional analytics instance
  */
 export default function CommissionerMatchupsSection({ user, poolId, poolData, analytics }) {
-  const isCommissioner = poolData?.commissionerId === user?.uid;
-  const db = getDb();
-
-  // State for errors & success
+  // 1) Declare all Hooks at top level
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  // State for upcoming games
+  // For schedule-based games (e.g., via Sportradar)
   const [games, setGames] = useState([]);
   const [fetchingGames, setFetchingGames] = useState(false);
 
-  // State for existing matchups in sub-collection
+  // For existing matchups in Firestore sub-collection
   const [matchups, setMatchups] = useState([]);
   const [loadingMatchups, setLoadingMatchups] = useState(true);
 
-  if (!isCommissioner) {
-    return null; // Hide if not commissioner
-  }
+  const db = getDb();
 
-  // Fetch matchups from sub-collection in real-time
+  // 2) Real-time listener for existing matchups
   useEffect(() => {
     setLoadingMatchups(true);
     const matchupsRef = collection(db, "pools", poolId, "matchups");
     const unsubscribe = onSnapshot(
       matchupsRef,
       (snapshot) => {
-        const matchupData = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data()
+        const matchupData = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
         }));
         setMatchups(matchupData);
         setLoadingMatchups(false);
@@ -86,9 +79,8 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
     return () => unsubscribe();
   }, [db, poolId]);
 
-  // Fetch upcoming games if the pool has a recognized sport/season
+  // 3) Fetch upcoming games if the pool has a recognized .sport and .season
   useEffect(() => {
-    // Only fetch if the pool has e.g. poolData.sport and poolData.season
     if (!poolData?.sport || !poolData?.season) {
       return; // Not enough info to fetch schedule
     }
@@ -96,10 +88,11 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
     const doFetch = async () => {
       setFetchingGames(true);
       try {
+        // e.g. "nfl", "2025"
         const upcoming = await fetchSchedule(poolData.sport.toLowerCase(), poolData.season);
         setGames(upcoming);
       } catch (err) {
-        setError("Failed to fetch upcoming games from schedule.");
+        setError("Failed to fetch upcoming games.");
         console.error("CommissionerMatchupsSection - fetchSchedule error:", err);
       } finally {
         setFetchingGames(false);
@@ -109,29 +102,34 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
     doFetch();
   }, [poolData?.sport, poolData?.season]);
 
-  // Clear any old messages if pool changes
+  // 4) Clear old messages if pool changes
   useEffect(() => {
     setError("");
     setSuccessMessage("");
   }, [poolId]);
 
+  // 5) Check if user is commissioner AFTER hooks
+  const isCommissioner = poolData?.commissionerId === user?.uid;
+  if (!isCommissioner) {
+    return null;
+  }
+
   /**
-   * Adds a game as a matchup in Firestore sub-collection
+   * handleAddGame: Add a game to Firestore sub-collection "matchups"
    */
   const handleAddGame = async (game) => {
     setError("");
     setSuccessMessage("");
 
-    // Build a matchup object from the `game` data
     const matchup = {
-      gameId: game.id, // or game.gameId
+      gameId: game.id,
       homeTeam: game.home.name,
       awayTeam: game.away.name,
-      startTime: game.scheduled, // ISO string
-      status: "pending"
+      startTime: game.scheduled,
+      status: "pending",
     };
 
-    // Basic validation (you could do more if needed)
+    // Quick validation
     if (!matchup.homeTeam || !matchup.awayTeam || !matchup.startTime) {
       setError("Game data is incomplete. Cannot add this matchup.");
       return;
@@ -163,7 +161,7 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
   };
 
   /**
-   * Optional: Remove an existing matchup
+   * handleRemoveMatchup: remove an existing matchup doc
    */
   const handleRemoveMatchup = async (matchupId) => {
     setError("");
@@ -194,6 +192,7 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
     }
   };
 
+  // 6) Render the UI
   return (
     <Card sx={{ mb: 3, borderRadius: 2, boxShadow: 3 }}>
       <CardContent>
@@ -217,6 +216,7 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
           </Alert>
         </Snackbar>
 
+        {/* Upcoming Games (from schedule) */}
         <Box sx={{ mb: 4 }}>
           <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
             Upcoming Games (via Sportradar)
@@ -227,7 +227,9 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
               <Typography sx={{ mt: 1 }}>Fetching games...</Typography>
             </Box>
           ) : games.length === 0 ? (
-            <Alert severity="info">No upcoming games found for {poolData.sport} {poolData.season}.</Alert>
+            <Alert severity="info">
+              No upcoming games found for {poolData.sport} {poolData.season}.
+            </Alert>
           ) : (
             <Table size="small" aria-label="Upcoming games table">
               <TableHead>
@@ -241,6 +243,7 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
                 {games.map((game) => {
                   const dateStr = new Date(game.scheduled).toLocaleString();
                   const isAlreadyAdded = matchups.some((m) => m.gameId === game.id);
+
                   return (
                     <TableRow key={game.id}>
                       <TableCell>{dateStr}</TableCell>
@@ -265,6 +268,7 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
           )}
         </Box>
 
+        {/* Existing Matchups */}
         <Box>
           <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
             Existing Matchups in Your Pool
@@ -292,13 +296,10 @@ export default function CommissionerMatchupsSection({ user, poolId, poolData, an
                       {m.homeTeam} vs {m.awayTeam}
                     </TableCell>
                     <TableCell>
-                      {m.startTime
-                        ? new Date(m.startTime).toLocaleString()
-                        : "N/A"}
+                      {m.startTime ? new Date(m.startTime).toLocaleString() : "N/A"}
                     </TableCell>
                     <TableCell>{m.status}</TableCell>
                     <TableCell align="right">
-                      {/* Optional remove button */}
                       <Button
                         variant="outlined"
                         color="error"

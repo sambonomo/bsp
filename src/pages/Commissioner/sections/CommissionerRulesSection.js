@@ -30,65 +30,60 @@ import { calculatePickemScores } from "../../../utils/calculatePickemScores";
  * Manages “rules” for squares or strip_cards, plus pick’em scoring or other format-specific actions.
  *
  * Props:
- * - user: current user (to check if they’re commissioner)
+ * - user: current user
  * - poolId: Firestore doc ID
- * - poolData: pool object from Firestore (must contain .format, .rules, etc.)
- * - analytics: optional analytics instance if you want to log from here
+ * - poolData: the pool object
+ * - analytics: optional analytics instance
  */
 export default function CommissionerRulesSection({ user, poolId, poolData, analytics }) {
-  const isCommissioner = poolData?.commissionerId === user?.uid;
-
-  // Local states for squares + strip cards rules
+  // 1) Declare Hooks at top level
   const [winCondition, setWinCondition] = useState(
     poolData?.rules?.winCondition || "lastDigit" // squares default
   );
   const [matchRule, setMatchRule] = useState(
     poolData?.rules?.matchRule || "sumLastDigit" // strip_cards default
   );
-
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-
-  // For the squares reassign step
   const [reassignLoading, setReassignLoading] = useState(false);
-
-  // For pick’em scoring
   const [pickemLoading, setPickemLoading] = useState(false);
 
   const db = getDb();
 
+  // 2) Clear messages if pool changes
   useEffect(() => {
-    // Clear any old messages if pool changes
     setError("");
     setSuccessMessage("");
   }, [poolId]);
 
+  // 3) Check if user is commissioner AFTER Hooks
+  const isCommissioner = poolData?.commissionerId === user?.uid;
   if (!isCommissioner) {
-    // Hide entirely if user is not commissioner
+    // Hide if user not commissioner
     return null;
   }
 
   /**
    * handleUpdateRules:
-   * Updates the pool doc’s `rules` field with our local states (winCondition, matchRule).
+   * Updates the pool doc’s `rules` field with local states.
    */
   const handleUpdateRules = async () => {
     setError("");
     setSuccessMessage("");
 
-    // Build a rules object
     const newRules = {
-      // if squares
+      // squares
       winCondition,
-      // if strip_cards
+      // strip_cards
       matchRule,
-      // can add more fields for pickem, survivor, etc.
+      // add more as needed
     };
 
     try {
       const poolRef = doc(db, "pools", poolId);
       await updateDoc(poolRef, { rules: newRules });
       setSuccessMessage("Rules updated successfully!");
+
       if (analytics) {
         logEvent(analytics, "update_rules", {
           userId: user.uid,
@@ -113,8 +108,7 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
 
   /**
    * handleReassignGridDigits:
-   * For squares format, shuffles digits 0-9 for each axis.
-   * Then updates the doc with axisNumbers.x and axisNumbers.y.
+   * For squares: shuffle digits 0-9 for each axis, update doc with axisNumbers.
    */
   const handleReassignGridDigits = async () => {
     if (poolData.format !== "squares") {
@@ -126,15 +120,14 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
     setReassignLoading(true);
 
     try {
-      const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-      const xAxis = shuffleArray(digits.slice()); // make a copy
+      const digits = [0,1,2,3,4,5,6,7,8,9];
+      const xAxis = shuffleArray(digits.slice());
       const yAxis = shuffleArray(digits.slice());
 
       const poolRef = doc(db, "pools", poolId);
-      await updateDoc(poolRef, {
-        axisNumbers: { x: xAxis, y: yAxis },
-      });
+      await updateDoc(poolRef, { axisNumbers: { x: xAxis, y: yAxis } });
       setSuccessMessage("Grid digits reassigned successfully!");
+
       if (analytics) {
         logEvent(analytics, "reassign_grid_digits", {
           userId: user.uid,
@@ -160,7 +153,7 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
 
   /**
    * handleComputePickemScores:
-   * Calls your existing pickem scoring logic from `calculatePickemScores.js`.
+   * Calls pickem scoring logic from `calculatePickemScores.js`
    */
   const handleComputePickemScores = async () => {
     if (poolData.format !== "pickem") {
@@ -172,8 +165,9 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
     setPickemLoading(true);
 
     try {
-      await calculatePickemScores(poolId); // This presumably does all Firestore writes
+      await calculatePickemScores(poolId);
       setSuccessMessage("Pick'em scores computed successfully!");
+
       if (analytics) {
         logEvent(analytics, "compute_pickem_scores", {
           userId: user.uid,
@@ -197,6 +191,7 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
     }
   };
 
+  // 4) Render UI
   return (
     <Card sx={{ mb: 3, borderRadius: 2, boxShadow: 3 }}>
       <CardContent>
@@ -222,9 +217,7 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
               Squares - Win Condition
             </Typography>
             <FormControl component="fieldset" sx={{ mb: 2 }}>
-              <FormLabel component="legend" sx={{ fontFamily: "'Poppins', sans-serif'" }}>
-                Win Condition
-              </FormLabel>
+              <FormLabel component="legend">Win Condition</FormLabel>
               <RadioGroup
                 row
                 value={winCondition}
@@ -235,13 +228,11 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
                   value="lastDigit"
                   control={<Radio />}
                   label="Last Digit Match"
-                  sx={{ fontFamily: "'Poppins', sans-serif'" }}
                 />
                 <FormControlLabel
                   value="exactScore"
                   control={<Radio />}
                   label="Exact Score Match"
-                  sx={{ fontFamily: "'Poppins', sans-serif'" }}
                 />
               </RadioGroup>
             </FormControl>
@@ -266,9 +257,7 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
               Strip Cards - Match Rule
             </Typography>
             <FormControl component="fieldset" sx={{ mb: 2 }}>
-              <FormLabel component="legend" sx={{ fontFamily: "'Poppins', sans-serif'" }}>
-                Match Rule
-              </FormLabel>
+              <FormLabel component="legend">Match Rule</FormLabel>
               <RadioGroup
                 row
                 value={matchRule}
@@ -279,40 +268,32 @@ export default function CommissionerRulesSection({ user, poolId, poolData, analy
                   value="sumLastDigit"
                   control={<Radio />}
                   label="Sum Last Digit"
-                  sx={{ fontFamily: "'Poppins', sans-serif'" }}
                 />
                 <FormControlLabel
                   value="individualLastDigit"
                   control={<Radio />}
                   label="Individual Last Digit"
-                  sx={{ fontFamily: "'Poppins', sans-serif'" }}
                 />
               </RadioGroup>
             </FormControl>
           </>
         )}
 
-        {/* PICK'EM SCORING */}
+        {/* PICK'EM POOLS */}
         {poolData.format === "pickem" && (
-          <>
-            <Box sx={{ mb: 2 }}>
-              <Button
-                variant="contained"
-                onClick={handleComputePickemScores}
-                disabled={pickemLoading}
-                aria-label="Compute pick'em scores"
-              >
-                {pickemLoading ? "Computing..." : "Compute Pick'em Scores"}
-              </Button>
-            </Box>
-          </>
+          <Box sx={{ mb: 2 }}>
+            <Button
+              variant="contained"
+              onClick={handleComputePickemScores}
+              disabled={pickemLoading}
+              aria-label="Compute pick'em scores"
+            >
+              {pickemLoading ? "Computing..." : "Compute Pick'em Scores"}
+            </Button>
+          </Box>
         )}
 
-        {/* FUTURE: Survivor? Additional rules? etc. */}
-        {/* e.g. if (poolData.format === "survivor") { ... } */}
-
-        {/* UPDATE RULES BUTTON (applies to squares or strip_cards) */}
-        {/* We won't show if pickem is the only logic, or you can keep it for consistency */}
+        {/* If squares or strip_cards, show an "Update Rules" button */}
         {(poolData.format === "squares" || poolData.format === "strip_cards") && (
           <Button variant="contained" onClick={handleUpdateRules} sx={{ mt: 2 }}>
             Update Rules

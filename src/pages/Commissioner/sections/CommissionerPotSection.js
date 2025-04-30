@@ -2,12 +2,21 @@
 
 import React, { useState, useEffect } from "react";
 import { doc, updateDoc } from "firebase/firestore";
-import { Box, Card, CardContent, Typography, Stack, TextField, Button, Alert } from "@mui/material";
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Stack,
+  TextField,
+  Button,
+  Alert,
+} from "@mui/material";
 
 import { getDb } from "../../../firebase/config";
 import { logEvent } from "firebase/analytics";
 
-// Validations you already have in ../utils/validations (adjust path as needed)
+// Validations you already have in ../utils/validations (adjust path if needed)
 import { validateBuyInAmount, validatePayoutStructure } from "../../../utils/validations";
 
 /**
@@ -15,15 +24,12 @@ import { validateBuyInAmount, validatePayoutStructure } from "../../../utils/val
  * Manages the pool's total pot and payout structure (Q1, Q2, Q3, Final).
  *
  * Props:
- * - user: the current logged-in user object (so we can check if commissioner)
- * - poolId: string (Firestore document ID for this pool)
- * - poolData: the pool object from Firestore (must contain commissionerId, totalPot, payoutStructure, etc.)
+ *  - user: the current logged-in user object (to check if commissioner)
+ *  - poolId: string (Firestore document ID)
+ *  - poolData: the pool object from Firestore (must contain commissionerId, totalPot, payoutStructure, etc.)
  */
 export default function CommissionerPotSection({ user, poolId, poolData }) {
-  // Check if user is the commissioner
-  const isCommissioner = poolData?.commissionerId === user?.uid;
-
-  // Local state for errors and success messages
+  // 1) Declare Hooks at top
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -33,26 +39,30 @@ export default function CommissionerPotSection({ user, poolId, poolData }) {
   );
 
   // Local state for payout structure
-  // If no payoutStructure in doc, default to { q1: 0.2, q2: 0.2, q3: 0.2, final: 0.4 }
-  const initialPayout = poolData?.payoutStructure || { q1: 0.2, q2: 0.2, q3: 0.2, final: 0.4 };
+  const initialPayout = poolData?.payoutStructure || {
+    q1: 0.2,
+    q2: 0.2,
+    q3: 0.2,
+    final: 0.4,
+  };
   const [q1, setQ1] = useState(initialPayout.q1);
   const [q2, setQ2] = useState(initialPayout.q2);
   const [q3, setQ3] = useState(initialPayout.q3);
   const [finalQ, setFinalQ] = useState(initialPayout.final);
 
-  // Firestore reference
   const db = getDb();
 
-  // If not commissioner, hide this entire section
-  if (!isCommissioner) {
-    return null;
-  }
-
-  // Clears error/success upon mounting or if pool changes
+  // 2) Reset error/success upon mounting or if pool changes
   useEffect(() => {
     setError("");
     setSuccessMessage("");
   }, [poolId]);
+
+  // 3) Check if user is commissioner AFTER hooks
+  const isCommissioner = poolData?.commissionerId === user?.uid;
+  if (!isCommissioner) {
+    return null;
+  }
 
   /**
    * handleUpdateTotalPot
@@ -79,8 +89,8 @@ export default function CommissionerPotSection({ user, poolId, poolData }) {
       const poolRef = doc(db, "pools", poolId);
       await updateDoc(poolRef, { totalPot: parsedPot });
       setSuccessMessage("Total pot updated successfully!");
-      // You can log an analytics event here if you want
-      // e.g.: logEvent(analytics, "update_total_pot", {...})
+      // Optionally log analytics
+      // if (analytics) { ... }
     } catch (err) {
       console.error("handleUpdateTotalPot - Error:", err);
       setError(err.message || "Failed to update total pot.");
@@ -89,7 +99,7 @@ export default function CommissionerPotSection({ user, poolId, poolData }) {
 
   /**
    * handleUpdatePayouts
-   * Validates Q1/Q2/Q3/Final, then updates `payoutStructure` in Firestore.
+   * Validates Q1/Q2/Q3/Final, then updates `payoutStructure`.
    */
   const handleUpdatePayouts = async () => {
     setError("");
@@ -114,14 +124,15 @@ export default function CommissionerPotSection({ user, poolId, poolData }) {
       const poolRef = doc(db, "pools", poolId);
       await updateDoc(poolRef, { payoutStructure: structure });
       setSuccessMessage("Payout structure updated successfully!");
-      // You can log an analytics event here if you want
-      // e.g.: logEvent(analytics, "update_payout_structure", {...})
+      // Optionally log analytics
+      // if (analytics) { ... }
     } catch (err) {
       console.error("handleUpdatePayouts - Error:", err);
       setError(err.message || "Failed to update payout structure.");
     }
   };
 
+  // 4) Render UI
   return (
     <Card sx={{ mb: 3, borderRadius: 2, boxShadow: 3 }}>
       <CardContent>
@@ -166,7 +177,11 @@ export default function CommissionerPotSection({ user, poolId, poolData }) {
           <Typography variant="subtitle1" sx={{ mb: 1 }}>
             Payout Structure (Decimal or Fraction of 1.0)
           </Typography>
-          <Stack spacing={2} direction={{ xs: "column", sm: "row" }} sx={{ mb: 2 }}>
+          <Stack
+            spacing={2}
+            direction={{ xs: "column", sm: "row" }}
+            sx={{ mb: 2 }}
+          >
             <TextField
               label="Q1 (%)"
               type="number"

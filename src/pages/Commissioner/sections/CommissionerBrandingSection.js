@@ -23,7 +23,7 @@ import { logEvent } from "firebase/analytics";
  * @returns {boolean}
  */
 function validateLogoURL(url) {
-  if (!url) return true; // If empty, that’s fine (no logo).
+  if (!url) return true; // If empty, that's fine (no logo).
   try {
     new URL(url);
     return true;
@@ -43,30 +43,30 @@ function validateLogoURL(url) {
  * - analytics: optional analytics instance if you want to log from here
  */
 export default function CommissionerBrandingSection({ user, poolId, poolData, analytics }) {
-  const isCommissioner = poolData?.commissionerId === user?.uid;
+  // 1) Declare all Hooks at the top, unconditionally:
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  // If not commissioner, hide this entire section
-  if (!isCommissioner) {
-    return null;
-  }
-
-  // Default theme values
   const themeDefaults = poolData?.theme || {};
   const [primaryColor, setPrimaryColor] = useState(themeDefaults.primaryColor || "#1976d2");
   const [secondaryColor, setSecondaryColor] = useState(themeDefaults.secondaryColor || "#9c27b0");
   const [logoURL, setLogoURL] = useState(themeDefaults.logoURL || "");
 
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  const [saving, setSaving] = useState(false);
-
   const db = getDb();
 
+  // 2) If the pool changes, reset messages:
   useEffect(() => {
-    // Reset messages when the pool changes
     setError("");
     setSuccessMessage("");
   }, [poolId]);
+
+  // 3) Check if user is commissioner
+  const isCommissioner = poolData?.commissionerId === user?.uid;
+  // If not commissioner, return here (but after all Hooks are declared)
+  if (!isCommissioner) {
+    return null;
+  }
 
   /**
    * handleSaveBranding:
@@ -141,6 +141,7 @@ export default function CommissionerBrandingSection({ user, poolId, poolData, an
     )
     : null;
 
+  // 4) Return the UI
   return (
     <Card sx={{ mb: 3, borderRadius: 2, boxShadow: 3 }}>
       <CardContent>
@@ -174,7 +175,9 @@ export default function CommissionerBrandingSection({ user, poolId, poolData, an
                 aria-label="Select primary color for pool branding"
                 style={{ width: 50, height: 50, cursor: "pointer" }}
               />
-              <Typography sx={{ fontFamily: "'Poppins', sans-serif'" }}>{primaryColor}</Typography>
+              <Typography sx={{ fontFamily: "'Poppins', sans-serif'" }}>
+                {primaryColor}
+              </Typography>
             </Box>
           </Box>
 
@@ -192,7 +195,9 @@ export default function CommissionerBrandingSection({ user, poolId, poolData, an
                 aria-label="Select secondary color for pool branding"
                 style={{ width: 50, height: 50, cursor: "pointer" }}
               />
-              <Typography sx={{ fontFamily: "'Poppins', sans-serif'" }}>{secondaryColor}</Typography>
+              <Typography sx={{ fontFamily: "'Poppins', sans-serif'" }}>
+                {secondaryColor}
+              </Typography>
             </Box>
           </Box>
 
@@ -209,7 +214,9 @@ export default function CommissionerBrandingSection({ user, poolId, poolData, an
 
         {/* Branding Preview Box */}
         <Box sx={previewBoxStyle} aria-label="Branding preview area">
-          <Typography sx={{ fontFamily: "'Poppins', sans-serif'" }}>Branding Preview</Typography>
+          <Typography sx={{ fontFamily: "'Poppins', sans-serif'" }}>
+            Branding Preview
+          </Typography>
           {logoPreview}
         </Box>
 

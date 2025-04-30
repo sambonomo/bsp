@@ -1,3 +1,4 @@
+// /src/pages/PoolView.js
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -6,6 +7,7 @@ import { db, analytics } from "../firebase/config";
 import { doc, onSnapshot, getDoc, setDoc } from "firebase/firestore";
 import { logEvent } from "firebase/analytics";
 import { fetchScores } from "../utils/api";
+
 import {
   Container,
   Box,
@@ -20,13 +22,16 @@ import {
   CardContent,
   Chip,
 } from "@mui/material";
+
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ManageMembersModal from "../modals/ManageMembersModal";
 import EnterScoresModal from "../modals/EnterScoresModal";
 import SquaresGrid from "../components/SquaresGrid";
 import StripCardList from "../components/StripCardList";
 
-// Styled components for polished UI
+// ------------------------------------
+// Styled Components
+// ------------------------------------
 const PoolViewContainer = styled(Box)(({ theme }) => ({
   background: theme.palette.mode === "dark"
     ? "linear-gradient(180deg, #1A2A44 0%, #2A3B5A 100%)"
@@ -71,12 +76,17 @@ const StyledButton = styled(Button)(({ theme }) => ({
   },
 }));
 
-function PoolView() {
+// ------------------------------------
+// Main Component
+// ------------------------------------
+export default function PoolView() {
+  // 1) Hooks at the top
   const { poolId } = useParams();
+  const navigate = useNavigate();
   const { user, authLoading } = useAuth();
   const { mode } = useThemeContext();
   const isDarkMode = mode === "dark";
-  const navigate = useNavigate();
+
   const [poolData, setPoolData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -84,12 +94,22 @@ function PoolView() {
   const [enterScoresOpen, setEnterScoresOpen] = useState(false);
   const [liveScores, setLiveScores] = useState([]);
   const [scoreError, setScoreError] = useState("");
+
+  // Refs for analytics logging
   const hasLoggedPageView = useRef(false);
   const hasLoggedBackClick = useRef(false);
   const hasLoggedManageMembersClick = useRef(false);
   const hasLoggedEnterScoresClick = useRef(false);
 
-  // Track page view on mount (only once)
+  // 2) Reset certain analytics flags if user or pool changes
+  useEffect(() => {
+    hasLoggedPageView.current = false;
+    hasLoggedBackClick.current = false;
+    hasLoggedManageMembersClick.current = false;
+    hasLoggedEnterScoresClick.current = false;
+  }, [user?.uid, poolId]);
+
+  // 3) Track page view once
   useEffect(() => {
     if (!hasLoggedPageView.current && analytics) {
       logEvent(analytics, "pool_view_page_viewed", {
@@ -102,18 +122,15 @@ function PoolView() {
     }
   }, [user?.uid, poolId]);
 
-  // Fetch pool data with real-time updates
+  // 4) Real-time listener for pool doc
   useEffect(() => {
-    if (authLoading) {
-      return; // Wait for auth state to resolve
-    }
-
+    if (authLoading) return; // Wait for auth to resolve
     if (!user) {
+      // Not logged in => redirect
       setLoading(false);
       navigate("/login");
       return;
     }
-
     if (!poolId) {
       setError("Invalid pool ID.");
       setLoading(false);
@@ -121,7 +138,6 @@ function PoolView() {
     }
 
     const poolRef = doc(db, "pools", poolId);
-
     const unsubscribe = onSnapshot(
       poolRef,
       (snapshot) => {
@@ -144,6 +160,7 @@ function PoolView() {
         }
         setError(userFriendlyError);
         setLoading(false);
+
         if (analytics) {
           logEvent(analytics, "pool_fetch_failed", {
             userId: user?.uid || "anonymous",
@@ -159,7 +176,7 @@ function PoolView() {
     return () => unsubscribe();
   }, [user, authLoading, poolId, navigate]);
 
-  // Fetch live scores when pool data is available, with caching
+  // 5) Live scores fetching / caching
   useEffect(() => {
     if (!poolData || !poolData.sport || !poolData.eventDate) return;
 
@@ -169,6 +186,7 @@ function PoolView() {
         const eventDate = poolData.eventDate.toDate().toISOString().split("T")[0];
         const scoreDocRef = doc(db, "scores", `${poolData.sport}_${poolData.id}_${eventDate}`);
 
+        // Try using cached doc first
         const scoreDoc = await getDoc(scoreDocRef);
         if (scoreDoc.exists()) {
           const { events, lastUpdated } = scoreDoc.data();
@@ -176,17 +194,20 @@ function PoolView() {
           const currentTime = new Date().getTime();
           const fiveMinutes = 5 * 60 * 1000;
 
+          // If we cached in the last 5 min, use it
           if (currentTime - lastUpdatedTime < fiveMinutes) {
             setLiveScores(events);
             return;
           }
         }
 
+        // Otherwise, fetch fresh from API
         const events = await fetchScores(poolData.sport, eventDate);
         if (events.length === 0) {
           setScoreError("No live scores available for this event.");
         } else {
-          const filteredEvents = poolData.teamAName && poolData.teamBName
+          // Filter by teamAName/teamBName if present
+          const filteredEvents = (poolData.teamAName && poolData.teamBName)
             ? events.filter(event =>
                 (event.strHomeTeam === poolData.teamAName && event.strAwayTeam === poolData.teamBName) ||
                 (event.strHomeTeam === poolData.teamBName && event.strAwayTeam === poolData.teamAName)
@@ -221,11 +242,11 @@ function PoolView() {
     };
 
     fetchLiveScores();
-    const interval = setInterval(fetchLiveScores, 5 * 60 * 1000);
+    const interval = setInterval(fetchLiveScores, 5 * 60 * 1000); // Re-fetch every 5 min
     return () => clearInterval(interval);
-  }, [poolData, user?.uid, poolId]);
+  }, [poolData, poolId]);
 
-  // Handle back navigation
+  // 6) Handlers
   const handleBackClick = () => {
     if (!hasLoggedBackClick.current && analytics) {
       logEvent(analytics, "pool_view_back_clicked", {
@@ -239,7 +260,6 @@ function PoolView() {
     navigate("/dashboard");
   };
 
-  // Handle opening the Manage Members modal
   const handleManageMembersClick = () => {
     setManageMembersOpen(true);
     if (!hasLoggedManageMembersClick.current && analytics) {
@@ -253,7 +273,6 @@ function PoolView() {
     }
   };
 
-  // Handle opening the Enter Scores modal
   const handleEnterScoresClick = () => {
     setEnterScoresOpen(true);
     if (!hasLoggedEnterScoresClick.current && analytics) {
@@ -267,15 +286,7 @@ function PoolView() {
     }
   };
 
-  // Reset analytics logging flags when user or poolId changes
-  useEffect(() => {
-    hasLoggedPageView.current = false;
-    hasLoggedBackClick.current = false;
-    hasLoggedManageMembersClick.current = false;
-    hasLoggedEnterScoresClick.current = false;
-  }, [user?.uid, poolId]);
-
-  // Show loading UI while auth state is resolving
+  // 7) Loading states
   if (authLoading) {
     return (
       <PoolViewContainer>
@@ -300,7 +311,6 @@ function PoolView() {
     );
   }
 
-  // Show loading UI while fetching pool data
   if (loading) {
     return (
       <PoolViewContainer>
@@ -325,7 +335,7 @@ function PoolView() {
     );
   }
 
-  // Show error message if fetching fails or pool not found
+  // 8) If error
   if (error) {
     return (
       <PoolViewContainer>
@@ -349,31 +359,48 @@ function PoolView() {
     );
   }
 
-  // Check if user is the commissioner
+  // 9) Check if user is commissioner
   const isCommissioner = poolData?.commissionerId === user.uid;
 
-  // Helper function to get winner display text
+  // Helper for winner display
   const getWinnerDisplay = (winner, format) => {
     if (!winner || !poolData) return "N/A";
+
+    // For squares
     if (format === "squares" && poolData.assignments) {
       const participant = poolData.assignments[winner];
       return participant || `Square #${winner}`;
-    } else if (format === "strip_cards" && poolData.participants) {
+    }
+    // For strip_cards
+    if (format === "strip_cards" && poolData.participants) {
       const participant = poolData.participants[winner - 1];
       return participant || `Strip #${winner}`;
-    } else if (format === "custom_pool") {
+    }
+    // For custom_pool
+    if (format === "custom_pool") {
       return winner;
     }
+    // fallback
     return `Winner #${winner}`;
   };
 
-  // Render the pool details if data is available
+  // 10) Render the pool details
   return (
     <PoolViewContainer>
       <Container maxWidth="lg">
         <Fade in timeout={1000}>
           <Box sx={{ py: 4 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 4, flexWrap: "wrap", gap: 2 }}>
+            {/* Title & Top Actions */}
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 4,
+                flexWrap: "wrap",
+                gap: 2,
+              }}
+            >
               <Typography
                 variant="h4"
                 sx={{
@@ -384,6 +411,7 @@ function PoolView() {
               >
                 {poolData.poolName || "Untitled Pool"}
               </Typography>
+
               <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                 {isCommissioner && (
                   <StyledButton
@@ -393,13 +421,18 @@ function PoolView() {
                     Manage Members & Payments
                   </StyledButton>
                 )}
-                {isCommissioner && (poolData.format === "squares" || poolData.format === "strip_cards" || poolData.format === "custom_pool") && (
-                  <StyledButton
-                    onClick={handleEnterScoresClick}
-                    aria-label="Enter scores"
-                  >
-                    Enter Scores
-                  </StyledButton>
+                {isCommissioner && (
+                  (poolData.format === "squares" ||
+                   poolData.format === "strip_cards" ||
+                   poolData.format === "custom_pool"
+                  ) && (
+                    <StyledButton
+                      onClick={handleEnterScoresClick}
+                      aria-label="Enter scores"
+                    >
+                      Enter Scores
+                    </StyledButton>
+                  )
                 )}
                 <StyledButton
                   onClick={handleBackClick}
@@ -508,7 +541,7 @@ function PoolView() {
                 </DetailCard>
               </Grid>
 
-              {/* Teams, Scores, and Winners (if applicable) */}
+              {/* Teams, Scores, & Winners */}
               {(poolData.teamAName || poolData.teamBName || poolData.format === "custom_pool") && (
                 <Grid item xs={12} md={6}>
                   <DetailCard variant="outlined">
@@ -524,6 +557,7 @@ function PoolView() {
                       >
                         Teams, Scores & Winners
                       </Typography>
+
                       {(poolData.format === "squares" || poolData.format === "strip_cards") && (
                         <>
                           <Typography
@@ -547,7 +581,7 @@ function PoolView() {
                             <strong>Team B:</strong> {poolData.teamBName || "N/A"}
                           </Typography>
 
-                          {/* Live Scores Section */}
+                          {/* Live Scores */}
                           {scoreError && (
                             <Typography
                               variant="body2"
@@ -590,7 +624,7 @@ function PoolView() {
                             </>
                           )}
 
-                          {/* Manual Scores Section (if available) */}
+                          {/* Manual Scores (Commissioner Entered) */}
                           {poolData.scores && (
                             <>
                               <Typography
@@ -661,6 +695,8 @@ function PoolView() {
                           )}
                         </>
                       )}
+
+                      {/* Custom pool with final winner */}
                       {poolData.format === "custom_pool" && poolData.winners?.final && (
                         <Typography
                           variant="body1"
@@ -678,14 +714,14 @@ function PoolView() {
                 </Grid>
               )}
 
-              {/* Render Squares Grid for squares format */}
+              {/* Squares Grid */}
               {poolData.format === "squares" && (
                 <Grid item xs={12}>
                   <SquaresGrid poolId={poolId} poolData={poolData} />
                 </Grid>
               )}
 
-              {/* Render Strip Card List for strip_cards format */}
+              {/* Strip Cards List */}
               {poolData.format === "strip_cards" && (
                 <Grid item xs={12}>
                   <StripCardList poolId={poolId} poolData={poolData} />
@@ -714,4 +750,3 @@ function PoolView() {
   );
 }
 
-export default PoolView;
