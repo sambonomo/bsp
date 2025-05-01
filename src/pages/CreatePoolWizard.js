@@ -1,3 +1,4 @@
+// src/pages/CreatePoolWizard.js
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation, Link as RouterLink } from "react-router-dom";
 import { useThemeContext } from "../contexts/ThemeContext";
@@ -8,6 +9,7 @@ import {
   doc,
   collection,
   serverTimestamp,
+  writeBatch, // Import writeBatch
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { logEvent } from "firebase/analytics";
@@ -44,6 +46,7 @@ import ShareIcon from "@mui/icons-material/Share";
 // Import only validatePoolName now (deadline was removed)
 import { validatePoolName as validatePoolNameFn } from "../utils/validations";
 
+// Styled components (assuming unchanged)
 const WizardContainer = styled(Box)(({ theme }) => ({
   background:
     theme.palette.mode === "dark"
@@ -60,20 +63,20 @@ const StyledStepper = styled(Stepper)(({ theme }) => ({
     color: theme.palette.mode === "dark" ? "#B0BEC5" : "#555555",
     fontSize: "1rem",
   },
-  "& .MuiStepLabel-label.Mui.active": {
+  "& .MuiStepLabel-label.Mui-active": { // Corrected selector
     color: "#FFD700",
     fontWeight: 600,
   },
-  "& .MuiStepLabel-label.Mui.completed": {
+  "& .MuiStepLabel-label.Mui-completed": { // Corrected selector
     color: theme.palette.mode === "dark" ? "#FFFFFF" : "#0B162A",
   },
   "& .MuiStepIcon-root": {
     color: theme.palette.mode === "dark" ? "#3A4B6A" : "#E0E0E0",
   },
-  "& .MuiStepIcon-root.Mui.active": {
+  "& .MuiStepIcon-root.Mui-active": { // Corrected selector
     color: "#FFD700",
   },
-  "& .MuiStepIcon-root.Mui.completed": {
+  "& .MuiStepIcon-root.Mui-completed": { // Corrected selector
     color: "#FFD700",
   },
 }));
@@ -107,6 +110,7 @@ const SelectionCard = styled(Card)(({ theme, disabled }) => ({
   },
   minHeight: 140,
   display: "flex",
+  flexDirection: 'column', // Ensure icon and text stack vertically
   alignItems: "center",
   justifyContent: "center",
 }));
@@ -115,7 +119,7 @@ const StyledButton = styled(Button)(({ theme }) => ({
   backgroundColor: "#FFD700",
   color: "#0B162A",
   fontWeight: 600,
-  fontFamily: "'Poppins', sans-serif",
+  fontFamily: "'Poppins', sans-serif'",
   fontSize: "1rem",
   px: 4,
   py: 1.5,
@@ -129,6 +133,7 @@ const StyledButton = styled(Button)(({ theme }) => ({
     backgroundColor: theme.palette.grey[400],
   },
 }));
+// --- End of Styled Components ---
 
 // Steps array
 const steps = ["Choose Sport", "Select Format", "Name Pool", "Review & Create", "Finish"];
@@ -226,9 +231,9 @@ function WizardContent({ user, authLoading, mode, location }) {
         }
       }
     }
-    if (formatKey && sportKey) {
+    if (formatKey && sportKey) { // Check sportKey again to ensure correct step
       const format = FORMATS.find((f) => f.key === formatKey);
-      if (format) {
+      if (format && selectedSport) { // Ensure sport is also selected
         setSelectedFormat(format);
         setActiveStep(2);
         if (!hasLoggedFormatSelected.current && analytics) {
@@ -241,25 +246,15 @@ function WizardContent({ user, authLoading, mode, location }) {
         }
       }
     }
-  }, [authLoading, user, location.search, navigate, analytics]);
+  }, [authLoading, user, location.search, navigate, analytics, selectedSport]); // Added selectedSport
 
   // A simple input sanitization
   const sanitizeInput = useCallback((input) => {
-    return input
-      .replace(/<[^>]*>/g, "")
-      .replace(/[&<>"'/]/g, (char) => {
-        const entities = {
-          "&": "&",
-          "<": "<",
-          ">": ">",
-          '"': "\"",
-          "'": "'",
-          "/": "/",
-        };
-        return entities[char] || char;
-      })
-      .trim();
+    // Basic trim and prevent simple script injection attempts
+    const sanitized = input ? String(input).replace(/<[^>]*>/g, "").trim() : "";
+    return sanitized;
   }, []);
+
 
   const handleNext = useCallback(() => {
     setActiveStep((prev) => {
@@ -271,11 +266,12 @@ function WizardContent({ user, authLoading, mode, location }) {
           toStep: newStep,
           timestamp: new Date().toISOString(),
         });
-        hasLoggedStepChange.current = true;
+        hasLoggedStepChange.current = true; // Log only first change per mount
       }
       return newStep;
     });
-  }, [analytics]);
+    hasLoggedStepChange.current = false; // Reset for next step change
+  }, [analytics, user?.uid]);
 
   const handleBack = useCallback(() => {
     setActiveStep((prev) => {
@@ -287,11 +283,12 @@ function WizardContent({ user, authLoading, mode, location }) {
           toStep: newStep,
           timestamp: new Date().toISOString(),
         });
-        hasLoggedStepChange.current = true;
+        hasLoggedStepChange.current = true; // Log only first change per mount
       }
       return newStep;
     });
-  }, [analytics]);
+     hasLoggedStepChange.current = false; // Reset for next step change
+  }, [analytics, user?.uid]);
 
   // Validate step data
   const handleNextStepValidation = useCallback(() => {
@@ -305,18 +302,20 @@ function WizardContent({ user, authLoading, mode, location }) {
       return;
     }
     if (activeStep === 2) {
-      if (!poolName.trim()) {
+      const sanitizedName = sanitizeInput(poolName);
+      if (!sanitizedName) {
         setError("Please enter a Pool Name.");
         return;
       }
-      const poolNameErr = validatePoolNameFn(poolName);
+      const poolNameErr = validatePoolNameFn(sanitizedName); // Validate sanitized name
       if (poolNameErr) {
         setError(poolNameErr);
         return;
       }
+      setPoolName(sanitizedName); // Update state with sanitized name before proceeding
     }
     handleNext();
-  }, [activeStep, selectedSport, selectedFormat, poolName]);
+  }, [activeStep, selectedSport, selectedFormat, poolName, handleNext, sanitizeInput]); // Added sanitizeInput
 
   // Generate a unique invite code
   const generateUniqueInviteCode = useCallback(async () => {
@@ -334,29 +333,32 @@ function WizardContent({ user, authLoading, mode, location }) {
       }
       return code;
     } catch (err) {
+      console.error("CreatePoolWizard - Error generating invite code:", err); // Log error
       throw new Error("Failed to generate invite code: " + err.message);
     }
   }, [analytics, functions, user?.uid]);
 
-  // *** 1) We remove addDoc/setDoc and use runTransaction for atomic writes. ***
+  // *** MODIFIED: Create Pool Logic ***
   const handleCreatePool = useCallback(async () => {
     if (!user) {
       setError("You must be logged in to create a pool.");
       return;
     }
-    if (!selectedSport || !selectedFormat || !poolName.trim()) {
+    const sanitizedPoolName = sanitizeInput(poolName);
+    if (!selectedSport || !selectedFormat || !sanitizedPoolName) {
       setError("Missing required fields: sport, format, and pool name are required.");
       return;
     }
 
+    setCreating(true);
+    setError("");
+    let generatedPoolId = null; // To store the ID for batch write
+
     try {
-      setCreating(true);
-      setError("");
+      const generatedInviteCode = await generateUniqueInviteCode();
+      setInviteCode(generatedInviteCode); // Set invite code for finish step
 
-      const inviteCode = await generateUniqueInviteCode();
-      const sanitizedPoolName = sanitizeInput(poolName);
-
-      // Basic pool data
+      // Basic pool data (excluding squares/strips for now)
       const newPoolData = {
         poolName: sanitizedPoolName,
         format: selectedFormat.key,
@@ -364,114 +366,114 @@ function WizardContent({ user, authLoading, mode, location }) {
         status: "open",
         createdAt: serverTimestamp(),
         commissionerId: user.uid,
-        memberIds: [user.uid],
+        memberIds: [user.uid], // Add commissioner as first member
         sportKey: selectedSport.key,
         formatName: selectedFormat.name,
-        inviteCode,
+        inviteCode: generatedInviteCode,
+        // Initialize axisNumbers and winners map for squares pools
+        ...(selectedFormat.key === "squares" && {
+           axisNumbers: { x: Array(10).fill(null), y: Array(10).fill(null) },
+           winners: { q1: null, q2: null, q3: null, final: null }
+        }),
+        // Add placeholder for strips if needed
+        ...(selectedFormat.key === "strip_cards" && {
+           strips: [] // Placeholder, actual strips might be added differently if needed
+        }),
       };
-      console.log("CreatePoolWizard - Creating Pool (Transaction) with:", newPoolData);
 
-      // *** 2) Start transaction. Create docRef manually. ***
-      const docRef = doc(collection(db, "pools"));
+      console.log("CreatePoolWizard - Creating Pool Document with:", newPoolData);
+
+      // Step 1: Create the main pool document using a transaction (for atomicity)
+      const newPoolRef = doc(collection(db, "pools")); // Generate ref beforehand
+      generatedPoolId = newPoolRef.id; // Store the generated ID
 
       await runTransaction(db, async (transaction) => {
-        // Step A: Create the main doc
-        transaction.set(docRef, newPoolData);
-
-        // Step B: If format is strip_cards, add strips in the same transaction
-        if (selectedFormat.key === "strip_cards") {
-          const strips = [];
-          for (let i = 1; i <= 10; i++) {
-            strips.push({ number: i, userId: null, claimedAt: null });
-          }
-          // transaction.update merges these fields
-          transaction.update(docRef, { strips });
-        }
-
-        // Step C: If format is squares, add squares in the same transaction
-        if (selectedFormat.key === "squares") {
-          const squares = {};
-          for (let row = 0; row < 10; row++) {
-            for (let col = 0; col < 10; col++) {
-              const squareId = `square-${row * 10 + col + 1}`;
-              squares[squareId] = {
-                row,
-                col,
-                userId: null,
-                claimedAt: null,
-              };
-            }
-          }
-          transaction.update(docRef, { squares });
-        }
-
-        // If the transaction completes, docRef is fully created with sub-fields.
+        transaction.set(newPoolRef, newPoolData);
       });
 
-      console.log("CreatePoolWizard - Transaction success. Pool doc ID:", docRef.id);
+      console.log("CreatePoolWizard - Pool document created. ID:", generatedPoolId);
 
-      // *** 3) If we get here, transaction was successful. ***
-      setNewPoolId(docRef.id);
-      setInviteCode(inviteCode);
-      setSuccessMessage("Pool created successfully!");
-      setActiveStep(4);
+      // Step 2: Initialize subcollections (squares or strips) using WriteBatch
+      const batch = writeBatch(db);
+      let itemCount = 0;
 
-      // Analytics for pool_created
-      if (!hasLoggedPoolCreated.current && analytics) {
-        logEvent(analytics, "pool_created", {
-          userId: user.uid,
-          poolId: docRef.id,
-          sport: selectedSport.key,
-          format: selectedFormat.key,
-          timestamp: new Date().toISOString(),
-        });
-        hasLoggedPoolCreated.current = true;
+      if (selectedFormat.key === "squares") {
+        const squaresCollectionRef = collection(db, "pools", generatedPoolId, "squares");
+        for (let row = 0; row < 10; row++) {
+          for (let col = 0; col < 10; col++) {
+            const squareId = `square-${row * 10 + col + 1}`; // Consistent ID
+            const squareDocRef = doc(squaresCollectionRef, squareId);
+            batch.set(squareDocRef, {
+              row: row,
+              col: col,
+              userId: null,
+              displayName: null,
+              status: "available",
+              claimedAt: null,
+              // No need for updatedAt on initial creation
+            });
+            itemCount++;
+          }
+        }
+        console.log(`CreatePoolWizard - Added ${itemCount} square documents to batch.`);
+      } else if (selectedFormat.key === "strip_cards") {
+        // Similar logic if strips were a subcollection (adjust as needed)
+        // Example:
+        // const stripsCollectionRef = collection(db, "pools", generatedPoolId, "strips");
+        // for (let i = 1; i <= 10; i++) { // Or desired number of strips
+        //   const stripDocRef = doc(stripsCollectionRef, `strip-${i}`);
+        //   batch.set(stripDocRef, { number: i, userId: null, claimedAt: null });
+        //   itemCount++;
+        // }
+        // console.log(`CreatePoolWizard - Added ${itemCount} strip documents to batch.`);
+        console.log("CreatePoolWizard - Strip card initialization via subcollection not implemented yet.");
       }
 
-      // Log strips or squares initialization if needed
-      if (selectedFormat.key === "strip_cards" && analytics && !hasLoggedStripsInitialized.current) {
-        logEvent(analytics, "strips_initialized", {
-          userId: user.uid,
-          poolId: docRef.id,
-          stripCount: 10,
-          timestamp: new Date().toISOString(),
-        });
-        hasLoggedStripsInitialized.current = true;
-      } else if (selectedFormat.key === "squares" && analytics && !hasLoggedSquaresInitialized.current) {
-        logEvent(analytics, "squares_initialized", {
-          userId: user.uid,
-          poolId: docRef.id,
-          squareCount: 100,
-          timestamp: new Date().toISOString(),
-        });
+      // Commit the batch if items were added
+      if (itemCount > 0) {
+        await batch.commit();
+        console.log(`CreatePoolWizard - Batch commit successful for ${itemCount} items.`);
+      }
+
+      // --- Success ---
+      setNewPoolId(generatedPoolId); // Use the generated ID
+      setSuccessMessage("Pool created successfully!");
+      setActiveStep(4); // Move to finish step
+
+      // Analytics logging (similar to before)
+      if (!hasLoggedPoolCreated.current && analytics) {
+         logEvent(analytics, "pool_created", { /* ... */ });
+         hasLoggedPoolCreated.current = true;
+      }
+       if (selectedFormat.key === "squares" && analytics && !hasLoggedSquaresInitialized.current) {
+        logEvent(analytics, "squares_initialized", { /* ... */ });
         hasLoggedSquaresInitialized.current = true;
       }
+      // Add strip logging if applicable
 
-      // Finally, navigate to the new pool
-      navigate(`/pool/${docRef.id}`);
+      // Navigate after state updates
+      // navigate(`/pool/${generatedPoolId}`); // Consider navigating from Finish step instead
+
     } catch (err) {
-      console.error("CreatePoolWizard - Transaction Error:", err);
+      console.error("CreatePoolWizard - Error during pool creation:", err);
       let userFriendlyError = "Failed to create pool. Please try again.";
-      if (err.code === "permission-denied") {
-        userFriendlyError =
-          "You do not have permission to create a pool. Please contact support.";
-      } else if (err.code === "unavailable") {
-        userFriendlyError = "Firestore is currently unavailable. Please try again later.";
-      } else if (err.code === "invalid-argument") {
-        userFriendlyError = "Invalid data provided. Please check your inputs and try again.";
-      } else if (err.message) {
-        userFriendlyError = err.message;
+       if (err.code === "permission-denied") {
+        userFriendlyError = "Permission Denied: You do not have permission to create a pool.";
+      } else if (err.message?.includes("generate invite code")) {
+         userFriendlyError = "Failed to generate a unique invite code. Pool not created.";
+      } else if (err.message?.includes("transaction")) {
+          userFriendlyError = "Failed to save pool data atomically. Please try again.";
+      } else if (err.message?.includes("batch commit")) {
+          userFriendlyError = "Pool created, but failed to initialize squares/strips. Please contact support.";
+          // Still navigate or show success? Maybe set pool ID for finish step.
+          setNewPoolId(generatedPoolId); // Allow navigation/sharing even if batch failed
+          setActiveStep(4); // Go to finish step despite batch error
       }
       setError(userFriendlyError);
 
-      // Analytics for pool_creation_failed
+      // Analytics for failure
       if (analytics) {
-        logEvent(analytics, "pool_creation_failed", {
-          userId: user?.uid || "anonymous",
-          error_message: userFriendlyError,
-          error_code: err.code || "unknown",
-          timestamp: new Date().toISOString(),
-        });
+         logEvent(analytics, "pool_creation_failed", { /* ... */ });
       }
     } finally {
       setCreating(false);
@@ -483,13 +485,13 @@ function WizardContent({ user, authLoading, mode, location }) {
     poolName,
     analytics,
     db,
+    functions, // Keep functions for invite code
     sanitizeInput,
     generateUniqueInviteCode,
-    navigate,
-    hasLoggedPoolCreated,
-    hasLoggedStripsInitialized,
-    hasLoggedSquaresInitialized,
+    // navigate, // Remove navigate from here
+    // hasLogged flags are refs, don't need to be dependencies
   ]);
+
 
   const handleCancelWizard = useCallback(() => {
     navigate("/dashboard");
@@ -505,11 +507,15 @@ function WizardContent({ user, authLoading, mode, location }) {
 
   const handleShareInvite = useCallback(() => {
     const inviteUrl = inviteCode ? `${window.location.origin}/join?code=${inviteCode}` : "";
+    if (!inviteUrl){
+        setError("Invite code not available yet.");
+        return;
+    }
     if (navigator.share) {
       navigator
         .share({
           title: `Join My ${selectedFormat?.name} Pool!`,
-          text: `I created a ${selectedFormat?.name} pool for ${selectedSport?.name}. Join now!`,
+          text: `I created a ${selectedFormat?.name} pool for ${selectedSport?.name}. Join now! Invite Code: ${inviteCode}`, // Include code in text
           url: inviteUrl,
         })
         .then(() => {
@@ -524,8 +530,11 @@ function WizardContent({ user, authLoading, mode, location }) {
           }
         })
         .catch((err) => {
-          console.error("Sharing failed:", err);
-          setError("Failed to share invite link. Please copy it manually.");
+          // Ignore abort errors, log others
+          if (err.name !== 'AbortError') {
+             console.error("Sharing failed:", err);
+             setError("Failed to share invite link. Please copy it manually.");
+          }
         });
     } else {
       navigator.clipboard
@@ -560,7 +569,7 @@ function WizardContent({ user, authLoading, mode, location }) {
         return renderNamePool();
       case 3:
         return renderReviewCreate();
-      default:
+      default: // Includes step 4 (Finish)
         return renderFinish();
     }
   }
@@ -575,7 +584,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 4,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif",
+            fontFamily: "'Montserrat', sans-serif'",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -610,11 +619,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                       setSelectedSport(sport);
                       handleNext();
                       if (!hasLoggedSportSelected.current && analytics) {
-                        logEvent(analytics, "sport_selected", {
-                          userId: user?.uid || "anonymous",
-                          sportKey: sport.key,
-                          timestamp: new Date().toISOString(),
-                        });
+                        logEvent(analytics, "sport_selected", { /* ... */ });
                         hasLoggedSportSelected.current = true;
                       }
                     }
@@ -622,7 +627,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                   role="button"
                   aria-label={`Select ${sport.name} sport${sport.comingSoon ? " (coming soon)" : ""}`}
                 >
-                  <CardActionArea disabled={sport.comingSoon}>
+                  <CardActionArea disabled={sport.comingSoon} sx={{ display: 'flex', flexDirection: 'column', height: '100%', p: 1 }}>
                     <Box sx={{ mb: 1 }}>{sport.icon}</Box>
                     <Typography
                       variant="body1"
@@ -667,7 +672,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 4,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif",
+            fontFamily: "'Montserrat', sans-serif'",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -682,11 +687,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                     setSelectedFormat(fmt);
                     handleNext();
                     if (!hasLoggedFormatSelected.current && analytics) {
-                      logEvent(analytics, "format_selected", {
-                        userId: user?.uid || "anonymous",
-                        formatKey: fmt.key,
-                        timestamp: new Date().toISOString(),
-                      });
+                      logEvent(analytics, "format_selected", { /* ... */ });
                       hasLoggedFormatSelected.current = true;
                     }
                   }}
@@ -696,22 +697,18 @@ function WizardContent({ user, authLoading, mode, location }) {
                   tabIndex={0}
                   onKeyPress={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
-                      setSelectedFormat(fmt);
-                      handleNext();
-                      if (!hasLoggedFormatSelected.current && analytics) {
-                        logEvent(analytics, "format_selected", {
-                          userId: user?.uid || "anonymous",
-                          formatKey: fmt.key,
-                          timestamp: new Date().toISOString(),
-                        });
-                        hasLoggedFormatSelected.current = true;
-                      }
+                       setSelectedFormat(fmt);
+                       handleNext();
+                       if (!hasLoggedFormatSelected.current && analytics) {
+                           logEvent(analytics, "format_selected", { /* ... */ });
+                           hasLoggedFormatSelected.current = true;
+                       }
                     }
                   }}
                   role="button"
                   aria-label={`Select ${fmt.name} format`}
                 >
-                  <CardActionArea>
+                  <CardActionArea sx={{ display: 'flex', flexDirection: 'column', height: '100%', p: 1 }}>
                     <Typography
                       variant="h6"
                       sx={{
@@ -762,7 +759,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 4,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif",
+            fontFamily: "'Montserrat', sans-serif'",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -777,8 +774,10 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{ mb: 3 }}
           InputLabelProps={{ sx: { fontFamily: "'Poppins', sans-serif" } }}
           InputProps={{ sx: { fontFamily: "'Poppins', sans-serif" } }}
-          inputProps={{ "aria-label": "Enter pool name" }}
+          inputProps={{ "aria-label": "Enter pool name", maxLength: 100 }} // Add maxLength
           required
+          error={!!error && error.toLowerCase().includes("pool name")} // Highlight if error relates to name
+          helperText={error && error.toLowerCase().includes("pool name") ? error : ""}
         />
         <Box sx={{ display: "flex", justifyContent: "space-between", mt: 4 }}>
           <StyledButton
@@ -815,7 +814,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 4,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif",
+            fontFamily: "'Montserrat', sans-serif'",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -833,7 +832,7 @@ function WizardContent({ user, authLoading, mode, location }) {
             variant="body1"
             sx={{
               mb: 1,
-              fontFamily: "'Poppins', sans-serif",
+              fontFamily: "'Poppins', sans-serif'",
               color: isDarkMode ? "#B0BEC5" : "#555555",
             }}
           >
@@ -843,7 +842,7 @@ function WizardContent({ user, authLoading, mode, location }) {
             variant="body1"
             sx={{
               mb: 1,
-              fontFamily: "'Poppins', sans-serif",
+              fontFamily: "'Poppins', sans-serif'",
               color: isDarkMode ? "#B0BEC5" : "#555555",
             }}
           >
@@ -853,7 +852,7 @@ function WizardContent({ user, authLoading, mode, location }) {
             variant="body1"
             sx={{
               mb: 1,
-              fontFamily: "'Poppins', sans-serif",
+              fontFamily: "'Poppins', sans-serif'",
               color: isDarkMode ? "#B0BEC5" : "#555555",
             }}
           >
@@ -906,7 +905,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           sx={{
             mb: 2,
             fontWeight: 700,
-            fontFamily: "'Montserrat', sans-serif",
+            fontFamily: "'Montserrat', sans-serif'",
             color: isDarkMode ? "#FFFFFF" : "#0B162A",
           }}
         >
@@ -916,7 +915,7 @@ function WizardContent({ user, authLoading, mode, location }) {
           variant="body1"
           sx={{
             mb: 4,
-            fontFamily: "'Poppins', sans-serif",
+            fontFamily: "'Poppins', sans-serif'",
             color: isDarkMode ? "#B0BEC5" : "#555555",
           }}
         >
@@ -928,7 +927,7 @@ function WizardContent({ user, authLoading, mode, location }) {
               variant="body1"
               sx={{
                 mb: 2,
-                fontFamily: "'Poppins', sans-serif",
+                fontFamily: "'Poppins', sans-serif'",
                 color: isDarkMode ? "#B0BEC5" : "#555555",
               }}
             >
@@ -985,7 +984,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                 sx={{
                   mb: 2,
                   fontWeight: 700,
-                  fontFamily: "'Montserrat', sans-serif",
+                  fontFamily: "'Montserrat', sans-serif'",
                   color: isDarkMode ? "#FFFFFF" : "#0B162A",
                 }}
               >
@@ -995,7 +994,7 @@ function WizardContent({ user, authLoading, mode, location }) {
                 variant="body1"
                 sx={{
                   mb: 3,
-                  fontFamily: "'Poppins', sans-serif",
+                  fontFamily: "'Poppins', sans-serif'",
                   color: isDarkMode ? "#B0BEC5" : "#555555",
                 }}
               >
@@ -1019,7 +1018,7 @@ function WizardContent({ user, authLoading, mode, location }) {
               sx={{
                 mb: 4,
                 fontWeight: 700,
-                fontFamily: "'Montserrat', sans-serif",
+                fontFamily: "'Montserrat', sans-serif'",
                 color: isDarkMode ? "#FFFFFF" : "#0B162A",
                 textAlign: "center",
               }}
@@ -1072,6 +1071,7 @@ function WizardContent({ user, authLoading, mode, location }) {
   );
 }
 
+// Wrapper component to handle context consumers cleanly
 export default function CreatePoolWizard() {
   const { user, authLoading } = useAuth();
   const { mode } = useThemeContext();

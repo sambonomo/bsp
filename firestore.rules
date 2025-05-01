@@ -1,153 +1,389 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Public stats collection
+    //============================================================
+    // Helper Functions
+    //============================================================
+
+    // Check if the requesting user is the commissioner of the given pool
+    function isCommissioner(poolData) {
+      // Ensure poolData is not null before accessing properties
+      return poolData != null && request.auth != null && 'commissionerId' in poolData && poolData.commissionerId == request.auth.uid;
+    }
+
+    // Check if the requesting user is listed in the memberIds of the given pool
+    function isMember(poolData) {
+      // Ensure poolData is not null before accessing properties
+      return poolData != null && request.auth != null
+             && 'memberIds' in poolData
+             && poolData.memberIds is list // Ensure it's a list before checking 'in'
+             && request.auth.uid in poolData.memberIds;
+    }
+
+    // Check if the requesting user is either the commissioner OR a member
+    function isMemberOrCommissioner(poolData) {
+      // isCommissioner and isMember already check for null poolData
+      return isCommissioner(poolData) || isMember(poolData);
+    }
+
+    // Check if the pool status is 'open'
+    function isPoolOpen(poolData) {
+      // Ensure poolData is not null before checking status
+      return poolData != null && poolData.status == 'open';
+    }
+
+    // Check if the pool is marked as featured
+    function isFeatured(poolData) {
+        // Ensure poolData is not null and isFeatured exists and is true
+        return poolData != null && 'isFeatured' in poolData && poolData.isFeatured == true;
+    }
+
+    // Get data for the parent pool document (used in subcollection rules)
+    // Returns null if the pool document doesn't exist
+    function getPoolData(poolId) {
+      return get(/databases/$(database)/documents/pools/$(poolId)).data;
+    }
+
+    // Validate the core data structure for a pool document
+    function isValidPoolData(data) {
+      return data.poolName is string && data.poolName.size() > 0 && data.poolName.size() <= 100
+             && data.format in ['pickem', 'squares', 'strip_cards', 'survivor', 'custom_pool'] // Add/remove formats as needed
+             && data.sport is string && data.sport.size() > 0 && data.sport.size() <= 50
+             && data.status in ['open', 'locked', 'archived'] // Added 'archived' status
+             && data.createdAt is timestamp
+             && data.commissionerId is string && data.commissionerId.size() > 0 // Must have a commissioner
+             && ('rules' in data ? data.rules is string && data.rules.size() <= 5000 : true) // Optional rules field
+             && ('isFeatured' in data ? data.isFeatured is bool : true) // Optional featured flag
+             && ('memberIds' in data ? // Optional memberIds list
+                   (data.memberIds is list && data.memberIds.size() <= 1000) // Increased limit slightly
+                   : true);
+             // Note: No longer validating individual memberId format here for performance. Assume valid UIDs.
+    }
+
+    // Validate data for a Pick'em entry
+    function isValidPickData(data) {
+       // Replace with your actual pick'em data validation
+       return 'userId' in data && data.userId is string && data.userId.size() > 0 // Ensure userId is present
+              && 'picks' in data && data.picks is map // Example: check if picks is a map
+              && 'week' in data && data.week is int; // Example: check for a week number
+              // Add checks for all required fields and their types/constraints
+    }
+
+    // Validate data for a Survivor entry
+    function isValidSurvivorEntryData(data) {
+       // Replace with your actual survivor data validation
+       return 'userId' in data && data.userId is string && data.userId.size() > 0
+              && 'picks' in data && data.picks is list // Example: list of team picks
+              && 'isEliminated' in data && data.isEliminated is bool; // Example: elimination status
+              // Add checks for all required fields and their types/constraints
+    }
+
+    // Validate data for a Square entry (when claimed/updated)
+    // Updated to match fields sent by client
+    function isValidSquareData(data) {
+      // Check required fields for interaction
+      let basicCheck = 'userId' in data && (data.userId is string || data.userId == null) // Allow null for unclaiming
+                       && 'row' in data && data.row is int && data.row >= 0 && data.row <= 9
+                       && 'col' in data && data.col is int && data.col >= 0 && data.col <= 9;
+
+      // Check optional fields if they exist
+      let displayNameCheck = !('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 100);
+      let statusCheck = !('status' in data) || data.status in ['available', 'claimed']; // Add other statuses if needed
+      let claimedAtCheck = !('claimedAt' in data) || data.claimedAt == null || data.claimedAt is timestamp || data.claimedAt is string; // Allow null or timestamp/string
+      // Removed updatedAtCheck as serverTimestamp cannot be validated directly here easily
+
+      return basicCheck && displayNameCheck && statusCheck && claimedAtCheck;
+    }
+
+
+    // Validate data for a Strip Card entry (when claimed/updated)
+    function isValidStripCardData(data) {
+      // Similar to squares, primarily care about userId assignment
+      return 'userId' in data && data.userId is string // UID or ""
+             && 'cardValue' in data && data.cardValue is string && data.cardValue.size() > 0; // Example: 'AH', 'KD', '7S'
+             // Add other potential fields if strip cards store more data
+    }
+
+    //------------------------------------------------------------
+    // Rules for Specific Collections
+    //------------------------------------------------------------
+
+    // Public stats collection (Unchanged)
     match /stats/{docId} {
-      allow read: if true; // Public read
-      // Only allow writes if user has custom claim isAdmin == true
+      allow read: if true;
       allow write: if request.auth != null && request.auth.token.isAdmin == true;
     }
 
-    // Pools collection
-    match /pools/{poolId} {
-
-      // Helper function to get pool data
-      function getPoolData() {
-        return get(/databases/$(database)/documents/pools/$(poolId)).data;
-      }
-
-      // ANY authenticated user can create a pool now
-      allow create: if request.auth != null
-                    && request.resource.data.keys().hasAll([
-                      'poolName',
-                      'format',
-                      'sport',
-                      'status',
-                      'createdAt',
-                      'commissionerId'
-                    ])
-                    && isValidPoolData(request.resource.data);
-
-      // Public reads for featured pools, or authenticated reads for members/commissioner
-      allow read: if resource.data.isFeatured == true
-                  || (request.auth != null && isMemberOrCommissioner(resource.data));
-
-      // Update logic remains the same:
-      allow update: if request.auth != null
-                    && (isCommissioner(resource.data) || canJoinPool(resource.data))
-                    && request.resource.data.keys().hasAll([
-                      'poolName',
-                      'format',
-                      'sport',
-                      'status',
-                      'commissionerId',
-                      'memberIds',
-                      'isFeatured'
-                    ])
-                    && isValidPoolData(request.resource.data);
-
-      allow delete: if request.auth != null && isCommissioner(resource.data);
-
-      // Sub-collections (e.g., matchups, participants, offlineUsers, squares)
-      match /matchups/{matchupId} {
-        allow read: if request.auth != null && isMemberOrCommissioner(getPoolData());
-        allow create, update: if request.auth != null
-                              && isCommissioner(getPoolData())
-                              && isValidMatchupData(request.resource.data);
-        allow delete: if request.auth != null && isCommissioner(getPoolData());
-      }
-      match /participants/{participantId} {
-        allow read: if request.auth != null && isMemberOrCommissioner(getPoolData());
-        allow write: if request.auth != null && isCommissioner(getPoolData());
-      }
-      match /offlineUsers/{offlineUserId} {
-        allow read: if request.auth != null && isMemberOrCommissioner(getPoolData());
-        allow write: if request.auth != null && isCommissioner(getPoolData());
-      }
-      match /squares/{squareId} {
-        allow read: if request.auth != null && isMemberOrCommissioner(getPoolData());
-        allow create, update: if request.auth != null
-                              && isCommissioner(getPoolData())
-                              && isValidSquareData(request.resource.data);
-        allow delete: if request.auth != null && isCommissioner(getPoolData());
-      }
-    }
-
-    // Users collection
+    // Users collection (Unchanged)
     match /users/{userId} {
       allow read, update, create: if request.auth != null && request.auth.uid == userId;
+      // Note: No delete rule here, typically users don't delete their own auth record directly via rules.
     }
 
-    // Example playerPools collection
-    match /playerPools/{docId} {
-      allow read, create, update, delete: if request.auth != null && isOwner(docId);
-    }
+    //============================================================
+    // POOLS Collection (`/pools/{poolId}`)
+    //============================================================
+    match /pools/{poolId} {
 
-    // HELPER FUNCTIONS
-    function isCommissioner(poolData) {
-      return 'commissionerId' in poolData
-             && poolData.commissionerId == request.auth.uid;
-    }
+      // --- CREATE ---
+      // Ensure creator is commissioner and initial data is valid.
+      // IMPORTANT: Client code MUST add commissionerId to memberIds list on creation.
+      allow create: if request.auth != null
+                      && request.resource.data.commissionerId == request.auth.uid
+                      // Check if creator is also the first member (recommended)
+                      && request.resource.data.memberIds[0] == request.auth.uid
+                      && request.resource.data.keys().hasAll([
+                           'poolName', 'format', 'sport', 'status', 'createdAt', 'commissionerId', 'memberIds' // Ensure memberIds is present
+                         ])
+                      && isValidPoolData(request.resource.data);
 
-    function isMemberOrCommissioner(poolData) {
-      return ('commissionerId' in poolData && poolData.commissionerId == request.auth.uid)
-             || ('memberIds' in poolData && request.auth.uid in poolData.memberIds);
-    }
+      // --- READ ---
+      // ** MODIFIED ** Allow reading if authenticated AND (pool is featured OR user is commissioner OR user is in memberIds)
+      // This explicitly allows queries filtering on memberIds or commissionerId.
+      allow read: if request.auth != null &&
+                     (isFeatured(resource.data) ||
+                      resource.data.commissionerId == request.auth.uid ||
+                      request.auth.uid in resource.data.memberIds);
 
-    function canJoinPool(poolData) {
-      return 'status' in poolData && poolData.status == 'open'
-             && (!('memberIds' in poolData) || !(request.auth.uid in poolData.memberIds));
-    }
 
-    function isOwner(docId) {
-      let doc = get(/databases/$(database)/documents/playerPools/$(docId)).data;
-      return 'userId' in doc && doc.userId == request.auth.uid;
-    }
+      // --- UPDATE ---
+      // Case 1: Commissioner updates settings.
+      // Case 2: User joins an open pool.
+      allow update: if request.auth != null && (
+                      // CASE 1: Commissioner updating the pool settings
+                      (
+                        isCommissioner(resource.data)
+                        && request.resource.data.commissionerId == resource.data.commissionerId // Commissioner cannot change
+                        && isValidPoolData(request.resource.data)
+                        // Ensure required fields for update are present (adjust as needed)
+                        && request.resource.data.keys().hasAll([
+                           'poolName', 'format', 'sport', 'status', 'createdAt', 'commissionerId', 'memberIds', 'isFeatured', 'rules'
+                         ])
+                      )
+                      ||
+                      // CASE 2: Regular user joining the pool (adding themselves to memberIds)
+                      (
+                        !isCommissioner(resource.data) // Must NOT be the commissioner
+                        && isPoolOpen(resource.data) // Pool must be open
+                        && !isMember(resource.data) // User must NOT already be a member
+                        // The ONLY change allowed is adding the user's own UID to memberIds
+                        && (('memberIds' in resource.data && request.resource.data.memberIds == resource.data.memberIds + [request.auth.uid])
+                            || (!('memberIds' in resource.data) && request.resource.data.memberIds == [request.auth.uid]))
+                        // All other fields must remain exactly the same as the existing document
+                        && request.resource.data.poolName == resource.data.poolName
+                        && request.resource.data.format == resource.data.format
+                        && request.resource.data.sport == resource.data.sport
+                        && request.resource.data.status == resource.data.status
+                        && request.resource.data.createdAt == resource.data.createdAt
+                        && request.resource.data.commissionerId == resource.data.commissionerId
+                        && request.resource.data.get('isFeatured', false) == resource.data.get('isFeatured', false)
+                        && request.resource.data.get('rules', '') == resource.data.get('rules', '')
+                      )
+                    );
 
-    // Validate new pool data 
-    function isValidPoolData(data) {
-      return data.poolName is string
-             && data.poolName.size() <= 100
-             && data.format in ['pickem', 'squares', 'strip_cards', 'survivor', 'custom_pool']
-             && data.sport is string
-             && data.sport.size() <= 50
-             && data.status in ['open', 'locked']
-             && data.createdAt is timestamp  // Must be a Firestore timestamp
-             && ('isFeatured' in data ? data.isFeatured is bool : true) // isFeatured is optional
-             && ('memberIds' in data ? (data.memberIds is list && data.memberIds.size() <= 500 && validateMemberIds(data.memberIds)) : true); // memberIds is optional
-    }
+      // --- DELETE ---
+      allow delete: if request.auth != null && isCommissioner(resource.data);
 
-    // Validate up to the first 10 memberIds are typical 28-length user IDs
-    function validateMemberIds(memberIds) {
-      return memberIds.size() == 0 || (
-        (memberIds.size() < 1 || (memberIds[0] is string && memberIds[0].size() == 28)) &&
-        (memberIds.size() < 2 || (memberIds[1] is string && memberIds[1].size() == 28)) &&
-        (memberIds.size() < 3 || (memberIds[2] is string && memberIds[2].size() == 28)) &&
-        (memberIds.size() < 4 || (memberIds[3] is string && memberIds[3].size() == 28)) &&
-        (memberIds.size() < 5 || (memberIds[4] is string && memberIds[4].size() == 28)) &&
-        (memberIds.size() < 6 || (memberIds[5] is string && memberIds[5].size() == 28)) &&
-        (memberIds.size() < 7 || (memberIds[6] is string && memberIds[6].size() == 28)) &&
-        (memberIds.size() < 8 || (memberIds[7] is string && memberIds[7].size() == 28)) &&
-        (memberIds.size() < 9 || (memberIds[8] is string && memberIds[8].size() == 28)) &&
-        (memberIds.size() < 10 || (memberIds[9] is string && memberIds[9].size() == 28))
-      );
-    }
+      //============================================================
+      // Subcollections within Pools
+      //============================================================
 
-    function isValidMatchupData(data) {
-      return data.keys().hasAll(['gameId','homeTeam','awayTeam','startTime','status'])
-             && data.gameId is string && data.gameId.size() <= 50
-             && data.homeTeam is string && data.homeTeam.size() <= 100
-             && data.awayTeam is string && data.awayTeam.size() <= 100
-             && data.startTime is string && data.startTime.size() <= 50
-             && data.status in ['pending','completed'];
-    }
+      // --- Pick'em Entries (`/pools/{poolId}/picks/{userId}`) ---
+      match /picks/{userId} {
+        // Read: Allowed if user is member/commissioner of the pool
+        allow read: if request.auth != null && isMemberOrCommissioner(getPoolData(poolId));
 
-    function isValidSquareData(data) {
-      return data.keys().hasAll(['row', 'col', 'userId'])
-             && data.row is int && data.row >= 0 && data.row <= 9
-             && data.col is int && data.col >= 0 && data.col <= 9
-             && data.userId is string && data.userId.size() == 28;
-    }
-  }
-}
+        // Create: Allowed if commissioner OR (user is creating their own entry in an open pool they are a member of)
+        allow create: if request.auth != null
+                        && isValidPickData(request.resource.data) // Validate incoming data
+                        && (
+                          isCommissioner(getPoolData(poolId)) // Commissioner can create for anyone
+                          || (
+                            isPoolOpen(getPoolData(poolId)) // Pool must be open
+                            && isMember(getPoolData(poolId)) // User must be a member
+                            && request.auth.uid == userId // User creating their own entry doc path
+                            && request.resource.data.userId == request.auth.uid // Data must contain own userId
+                          )
+                        );
+
+        // Update: Allowed if commissioner OR (user is updating their own entry in an open pool they are a member of)
+        allow update: if request.auth != null
+                        && isValidPickData(request.resource.data) // Validate incoming data
+                        && (
+                          isCommissioner(getPoolData(poolId)) // Commissioner can update anyone's entry
+                          || (
+                            isPoolOpen(getPoolData(poolId)) // Pool must be open
+                            && isMember(getPoolData(poolId)) // User must be a member
+                            && request.auth.uid == userId // User updating their own entry doc path
+                            && resource.data.userId == request.auth.uid // Existing data must be theirs
+                            && request.resource.data.userId == request.auth.uid // New data must still be theirs (cannot change owner)
+                          )
+                        );
+
+        // Delete: Allowed if commissioner OR (user is deleting their own entry in an open pool they are a member of)
+        allow delete: if request.auth != null
+                        && (
+                          isCommissioner(getPoolData(poolId)) // Commissioner can delete anyone's entry
+                          || (
+                            isPoolOpen(getPoolData(poolId)) // Pool must be open
+                            && isMember(getPoolData(poolId)) // User must be a member
+                            && request.auth.uid == userId // User deleting their own entry doc path
+                            && resource.data.userId == request.auth.uid // Verify ownership of existing doc
+                          )
+                        );
+      } // end /picks/{userId}
+
+      // --- Survivor Entries (`/pools/{poolId}/survivorEntries/{userId}`) ---
+      match /survivorEntries/{userId} {
+        // Rules mirror /picks/{userId} structure
+        allow read: if request.auth != null && isMemberOrCommissioner(getPoolData(poolId));
+
+        allow create: if request.auth != null
+                        && isValidSurvivorEntryData(request.resource.data)
+                        && (
+                          isCommissioner(getPoolData(poolId))
+                          || (
+                            isPoolOpen(getPoolData(poolId))
+                            && isMember(getPoolData(poolId))
+                            && request.auth.uid == userId
+                            && request.resource.data.userId == request.auth.uid
+                          )
+                        );
+
+        allow update: if request.auth != null
+                        && isValidSurvivorEntryData(request.resource.data)
+                        && (
+                          isCommissioner(getPoolData(poolId))
+                          || (
+                            isPoolOpen(getPoolData(poolId))
+                            && isMember(getPoolData(poolId))
+                            && request.auth.uid == userId
+                            && resource.data.userId == request.auth.uid
+                            && request.resource.data.userId == request.auth.uid
+                          )
+                        );
+
+        allow delete: if request.auth != null
+                        && (
+                          isCommissioner(getPoolData(poolId))
+                          || (
+                            isPoolOpen(getPoolData(poolId))
+                            && isMember(getPoolData(poolId))
+                            && request.auth.uid == userId
+                            && resource.data.userId == request.auth.uid
+                          )
+                        );
+      } // end /survivorEntries/{userId}
+
+
+      // --- Squares (`/pools/{poolId}/squares/{squareId}`) ---
+      match /squares/{squareId} {
+        // Read: Allowed if user is member/commissioner of the pool
+        allow read: if request.auth != null && isMemberOrCommissioner(getPoolData(poolId));
+
+        // ** MODIFIED ** Create: Allow if user is authenticated and data is valid.
+        // Assumes client-side logic (CreatePoolWizard) ensures only the commissioner
+        // triggers the initial batch creation immediately after pool creation.
+        // This avoids problematic get() calls within rules during batch writes.
+        allow create: if request.auth != null
+                        && isValidSquareData(request.resource.data);
+
+        // Update: Handles claiming, unclaiming, or commissioner edits.
+        allow update: if request.auth != null
+                        && isValidSquareData(request.resource.data) // Validate incoming data structure
+                        && (
+                          // CASE 1: Commissioner can update anything
+                          isCommissioner(getPoolData(poolId))
+                          ||
+                          // CASE 2: Regular member modifying a square in an open pool
+                          // User MUST be in memberIds list (ensure commissioner is added on pool creation)
+                          (
+                            isPoolOpen(getPoolData(poolId))
+                            && isMember(getPoolData(poolId)) // Check if user is explicitly a member
+                            && (
+                              // SubCase 2a: Claiming an unclaimed square
+                              ( (resource.data.userId == null || resource.data.userId == "") // Square is unclaimed (check existing data)
+                                && request.resource.data.userId == request.auth.uid // Claiming for self (check incoming data)
+                                // Ensure other essential fields are not changed by user during claim
+                                && request.resource.data.row == resource.data.row
+                                && request.resource.data.col == resource.data.col
+                              )
+                              ||
+                              // SubCase 2b: Unclaiming own square
+                              ( resource.data.userId == request.auth.uid // Square is currently owned by user (check existing data)
+                                && (request.resource.data.userId == null || request.resource.data.userId == "") // Setting userId to empty/null (check incoming data)
+                                // Ensure other essential fields are not changed by user during unclaim
+                                && request.resource.data.row == resource.data.row
+                                && request.resource.data.col == resource.data.col
+                              )
+                              // SubCase 2c (Removed): Regular members usually shouldn't modify other data on claimed squares.
+                              // If needed, add specific checks here for allowed field changes.
+                            )
+                          )
+                        );
+
+        // Delete: Only commissioner can delete squares (e.g., cleanup)
+        allow delete: if request.auth != null && isCommissioner(getPoolData(poolId));
+
+      } // end /squares/{squareId}
+
+
+      // --- Strip Cards (`/pools/{poolId}/stripCards/{cardId}`) ---
+      match /stripCards/{cardId} {
+         // Rules mirror /squares/{squareId} structure
+        allow read: if request.auth != null && isMemberOrCommissioner(getPoolData(poolId));
+
+        // ** MODIFIED ** Create: Allow if user is authenticated and data is valid.
+        // Assumes client-side logic ensures only commissioner triggers initial creation.
+        allow create: if request.auth != null
+                        && isValidStripCardData(request.resource.data);
+
+        allow update: if request.auth != null
+                        && isValidStripCardData(request.resource.data)
+                        && (
+                          isCommissioner(getPoolData(poolId))
+                          ||
+                          (
+                            isPoolOpen(getPoolData(poolId))
+                            && isMember(getPoolData(poolId)) // Check if user is explicitly a member
+                            && (
+                              // Claiming
+                              ( (resource.data.userId == null || resource.data.userId == "") // Check existing
+                                && request.resource.data.userId == request.auth.uid // Check incoming
+                                && request.resource.data.cardValue == resource.data.cardValue // Card value shouldn't change
+                              )
+                              ||
+                              // Unclaiming
+                              ( resource.data.userId == request.auth.uid // Check existing
+                                && (request.resource.data.userId == null || request.resource.data.userId == "") // Check incoming
+                                && request.resource.data.cardValue == resource.data.cardValue
+                              )
+                              // Modifying other data on own card (Removed - Add specific checks if needed)
+                            )
+                          )
+                        );
+
+        allow delete: if request.auth != null && isCommissioner(getPoolData(poolId));
+
+      } // end /stripCards/{cardId}
+
+      // --- Participants (`/pools/{poolId}/participants/{participantId}`) ---
+      // Assuming this stores participant info, potentially linked to users or offline entries
+      match /participants/{participantId} {
+           // Read: Allowed if user is member/commissioner of the pool
+           // This should allow listing the collection for members/commissioners
+           allow read: if request.auth != null && isMemberOrCommissioner(getPoolData(poolId));
+
+           // Write (Create, Update, Delete): Only commissioner can manage participants directly
+           allow write: if request.auth != null && isCommissioner(getPoolData(poolId));
+      } // end /participants/{participantId}
+
+
+      // --- Add other subcollections as needed (e.g., /chat, /settings) ---
+
+    } // end /pools/{poolId}
+
+  } // end /databases/{database}/documents
+} // end service cloud.firestore

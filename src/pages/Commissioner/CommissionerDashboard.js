@@ -1,5 +1,4 @@
 // /src/pages/Commissioner/CommissionerDashboard.js
-
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
@@ -16,6 +15,9 @@ import {
   Button,
 } from "@mui/material";
 
+// Import AuthContext to get the real user
+import { useAuth } from "../../contexts/AuthContext";
+
 // Sections
 import CommissionerPotSection from "./sections/CommissionerPotSection";
 import CommissionerRulesSection from "./sections/CommissionerRulesSection";
@@ -23,24 +25,20 @@ import CommissionerBrandingSection from "./sections/CommissionerBrandingSection"
 import CommissionerMatchupsSection from "./sections/CommissionerMatchupsSection";
 import CommissionerExtraToolsSection from "./sections/CommissionerExtraToolsSection";
 
-// If you have an AuthContext, you could import it here:
-// import { useAuth } from "../../contexts/AuthContext";
-
 /**
  * Main "Manage Pool" page for commissioners.
  * - Fetches the pool doc by poolId
  * - Renders sub-sections for pot, rules, branding, matchups, plus extra tools (offline users, lock pool, etc.)
  */
 export default function CommissionerDashboard() {
-  // 1) Gather route params & nav
+  // 1) Gather route params & navigation
   const { poolId } = useParams();
   const navigate = useNavigate();
 
-  // 2) If you have AuthContext, you can do: const { user } = useAuth();
-  // For example, here's a placeholder user:
-  const user = { uid: "dummyUid" };
+  // 2) Pull in the real user from AuthContext
+  const { user } = useAuth(); // <-- Instead of dummyUid
 
-  // 3) Declare all Hooks at the top
+  // 3) Declare local state
   const [poolData, setPoolData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
