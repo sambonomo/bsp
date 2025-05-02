@@ -1,229 +1,173 @@
-// /src/pages/Commissioner/sections/CommissionerPotSection.js
-
-import React, { useState, useEffect } from "react";
-import { doc, updateDoc } from "firebase/firestore";
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Stack,
-  TextField,
-  Button,
-  Alert,
-} from "@mui/material";
-
-import { getDb } from "../../../firebase/config";
-import { logEvent } from "firebase/analytics";
-
-// Validations you already have in ../utils/validations (adjust path if needed)
-import { validateBuyInAmount, validatePayoutStructure } from "../../../utils/validations";
-
-/**
- * CommissionerPotSection:
- * Manages the pool's total pot and payout structure (Q1, Q2, Q3, Final).
- *
- * Props:
- *  - user: the current logged-in user object (to check if commissioner)
- *  - poolId: string (Firestore document ID)
- *  - poolData: the pool object from Firestore (must contain commissionerId, totalPot, payoutStructure, etc.)
- */
-export default function CommissionerPotSection({ user, poolId, poolData }) {
-  // 1) Declare Hooks at top
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-
-  // Local state for total pot (default to string form)
-  const [totalPot, setTotalPot] = useState(
-    poolData?.totalPot ? String(poolData.totalPot) : ""
-  );
-
-  // Local state for payout structure
-  const initialPayout = poolData?.payoutStructure || {
-    q1: 0.2,
-    q2: 0.2,
-    q3: 0.2,
-    final: 0.4,
-  };
-  const [q1, setQ1] = useState(initialPayout.q1);
-  const [q2, setQ2] = useState(initialPayout.q2);
-  const [q3, setQ3] = useState(initialPayout.q3);
-  const [finalQ, setFinalQ] = useState(initialPayout.final);
-
-  const db = getDb();
-
-  // 2) Reset error/success upon mounting or if pool changes
-  useEffect(() => {
-    setError("");
-    setSuccessMessage("");
-  }, [poolId]);
-
-  // 3) Check if user is commissioner AFTER hooks
-  const isCommissioner = poolData?.commissionerId === user?.uid;
-  if (!isCommissioner) {
-    return null;
-  }
-
-  /**
-   * handleUpdateTotalPot
-   * Validates the `totalPot` input, then updates the pool doc in Firestore.
-   */
-  const handleUpdateTotalPot = async () => {
-    setError("");
-    setSuccessMessage("");
-
-    // 1) Validate
-    const validationError = validateBuyInAmount(totalPot);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    // 2) Parse (if numeric) or keep 'Donations only'
-    let parsedPot = totalPot.trim();
-    if (parsedPot.toLowerCase() !== "donations only") {
-      parsedPot = parseFloat(parsedPot);
-    }
-
-    try {
-      const poolRef = doc(db, "pools", poolId);
-      await updateDoc(poolRef, { totalPot: parsedPot });
-      setSuccessMessage("Total pot updated successfully!");
-      // Optionally log analytics
-      // if (analytics) { ... }
-    } catch (err) {
-      console.error("handleUpdateTotalPot - Error:", err);
-      setError(err.message || "Failed to update total pot.");
-    }
-  };
-
-  /**
-   * handleUpdatePayouts
-   * Validates Q1/Q2/Q3/Final, then updates `payoutStructure`.
-   */
-  const handleUpdatePayouts = async () => {
-    setError("");
-    setSuccessMessage("");
-
-    // Build an object from the four fields
-    const structure = {
-      q1: parseFloat(q1),
-      q2: parseFloat(q2),
-      q3: parseFloat(q3),
-      final: parseFloat(finalQ),
-    };
-
-    // Validate
-    const validationError = validatePayoutStructure(structure);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    try {
-      const poolRef = doc(db, "pools", poolId);
-      await updateDoc(poolRef, { payoutStructure: structure });
-      setSuccessMessage("Payout structure updated successfully!");
-      // Optionally log analytics
-      // if (analytics) { ... }
-    } catch (err) {
-      console.error("handleUpdatePayouts - Error:", err);
-      setError(err.message || "Failed to update payout structure.");
-    }
-  };
-
-  // 4) Render UI
-  return (
-    <Card sx={{ mb: 3, borderRadius: 2, boxShadow: 3 }}>
-      <CardContent>
-        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-          Pot & Payouts
-        </Typography>
-
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }} role="alert" aria-live="assertive">
-            {error}
-          </Alert>
-        )}
-        {successMessage && (
-          <Alert severity="success" sx={{ mb: 2 }} role="alert" aria-live="assertive">
-            {successMessage}
-          </Alert>
-        )}
-
-        {/* TOTAL POT SETTINGS */}
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="subtitle1" sx={{ mb: 1 }}>
-            Total Pot
-          </Typography>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <TextField
-              label="Total Pot"
-              placeholder='e.g. "100" or "Donations only"'
-              value={totalPot}
-              onChange={(e) => setTotalPot(e.target.value)}
-              size="small"
-              sx={{ width: 200 }}
-              inputProps={{ "aria-label": "Enter total pot amount" }}
-            />
-            <Button variant="contained" onClick={handleUpdateTotalPot}>
-              Update Pot
-            </Button>
-          </Stack>
-        </Box>
-
-        {/* PAYOUT STRUCTURE */}
-        <Box>
-          <Typography variant="subtitle1" sx={{ mb: 1 }}>
-            Payout Structure (Decimal or Fraction of 1.0)
-          </Typography>
-          <Stack
-            spacing={2}
-            direction={{ xs: "column", sm: "row" }}
-            sx={{ mb: 2 }}
-          >
-            <TextField
-              label="Q1 (%)"
-              type="number"
-              value={q1}
-              onChange={(e) => setQ1(e.target.value)}
-              size="small"
-              sx={{ width: 100 }}
-              inputProps={{ "aria-label": "Enter payout percentage for Q1" }}
-            />
-            <TextField
-              label="Q2 (%)"
-              type="number"
-              value={q2}
-              onChange={(e) => setQ2(e.target.value)}
-              size="small"
-              sx={{ width: 100 }}
-              inputProps={{ "aria-label": "Enter payout percentage for Q2" }}
-            />
-            <TextField
-              label="Q3 (%)"
-              type="number"
-              value={q3}
-              onChange={(e) => setQ3(e.target.value)}
-              size="small"
-              sx={{ width: 100 }}
-              inputProps={{ "aria-label": "Enter payout percentage for Q3" }}
-            />
-            <TextField
-              label="Final (%)"
-              type="number"
-              value={finalQ}
-              onChange={(e) => setFinalQ(e.target.value)}
-              size="small"
-              sx={{ width: 100 }}
-              inputProps={{ "aria-label": "Enter payout percentage for final" }}
-            />
-          </Stack>
-          <Button variant="contained" onClick={handleUpdatePayouts}>
-            Update Payouts
-          </Button>
-        </Box>
-      </CardContent>
-    </Card>
-  );
-}
+/* ------------------------------------------------------------------
+   src/pages/Commissioner/sections/CommissionerPotSection.js
+   ------------------------------------------------------------------ */
+   import React, { useState, useEffect } from "react";
+   import { doc, updateDoc }            from "firebase/firestore";
+   import {
+     Card, CardContent, Typography, Stack, TextField,
+     Button, Alert, Box, CircularProgress,
+   } from "@mui/material";
+   
+   import { getDb }                     from "../../../firebase/config";
+   import {
+     validateBuyInAmount,
+     validatePayoutStructure,
+   }                                   from "../../../utils/validations";
+   
+   export default function CommissionerPotSection({
+     user,      // firebase user
+     poolId,    // string
+     poolData,  // pool document
+   }) {
+     /* ────────────────────────────────────────────────────────────
+        1.  HOOKS
+        ─────────────────────────────────────────────────────────── */
+     const [loading, setLoading] = useState(!poolData);
+   
+     /* editable fields */
+     const [totalPot, setTotalPot] = useState(
+       poolData?.totalPot ? String(poolData.totalPot) : ""
+     );
+     const [q1,    setQ1]    = useState(poolData?.payoutStructure?.q1 ?? 0.2);
+     const [q2,    setQ2]    = useState(poolData?.payoutStructure?.q2 ?? 0.2);
+     const [q3,    setQ3]    = useState(poolData?.payoutStructure?.q3 ?? 0.2);
+     const [final, setFinal] = useState(poolData?.payoutStructure?.final ?? 0.4);
+   
+     /* feedback */
+     const [error, setError] = useState("");
+     const [msg,   setMsg]   = useState("");
+   
+     /* derived */
+     const db          = getDb();
+     const isCommish   = poolData?.commissionerId === user?.uid;
+   
+     /* when parent hands poolData later */
+     useEffect(() => {
+       if (poolData) {
+         setTotalPot(poolData.totalPot ? String(poolData.totalPot) : "");
+         setQ1(poolData.payoutStructure?.q1 ?? 0.2);
+         setQ2(poolData.payoutStructure?.q2 ?? 0.2);
+         setQ3(poolData.payoutStructure?.q3 ?? 0.2);
+         setFinal(poolData.payoutStructure?.final ?? 0.4);
+         setLoading(false);
+       }
+     }, [poolData]);
+   
+     /* ────────────────────────────────────────────────────────────
+        2.  EARLY RETURNS (after hooks)
+        ─────────────────────────────────────────────────────────── */
+     if (!isCommish) return null;               // hide for non-commissioners
+   
+     if (loading) {
+       return (
+         <Card sx={{ mb:3, borderRadius:2 }}>
+           <CardContent sx={{ textAlign:"center" }}>
+             <CircularProgress size={24} />
+           </CardContent>
+         </Card>
+       );
+     }
+   
+     /* ────────────────────────────────────────────────────────────
+        3.  HANDLERS
+        ─────────────────────────────────────────────────────────── */
+     const handleUpdatePot = async () => {
+       setError(""); setMsg("");
+   
+       /* validation */
+       const valErr = validateBuyInAmount(totalPot);
+       if (valErr) return setError(valErr);
+   
+       /* parse   (allow literal "donations only") */
+       const value =
+         totalPot.trim().toLowerCase() === "donations only"
+           ? "donations only"
+           : parseFloat(totalPot);
+   
+       try {
+         await updateDoc(doc(db, "pools", poolId), { totalPot: value });
+         setMsg("Total pot updated!");
+       } catch (e) {
+         setError(e.message || "Failed to update pot.");
+       }
+     };
+   
+     const handleUpdatePayouts = async () => {
+       setError(""); setMsg("");
+   
+       const structure = {
+         q1   : parseFloat(q1),
+         q2   : parseFloat(q2),
+         q3   : parseFloat(q3),
+         final: parseFloat(final),
+       };
+   
+       const valErr = validatePayoutStructure(structure);
+       if (valErr) return setError(valErr);
+   
+       try {
+         await updateDoc(doc(db, "pools", poolId), { payoutStructure: structure });
+         setMsg("Payout structure updated!");
+       } catch (e) {
+         setError(e.message || "Failed to update payouts.");
+       }
+     };
+   
+     /* ────────────────────────────────────────────────────────────
+        4.  UI
+        ─────────────────────────────────────────────────────────── */
+     return (
+       <Card sx={{ mb:3, borderRadius:2, boxShadow:3 }}>
+         <CardContent>
+   
+           <Typography variant="h6" sx={{ mb:2, fontWeight:600 }}>
+             Pot&nbsp;&amp;&nbsp;Payouts
+           </Typography>
+   
+           {error && <Alert severity="error"   sx={{ mb:2 }}>{error}</Alert>}
+           {msg   && <Alert severity="success" sx={{ mb:2 }}>{msg}</Alert>}
+   
+           {/* ── Total Pot ─────────────────────────────────────── */}
+           <Box sx={{ mb:3 }}>
+             <Typography variant="subtitle1" sx={{ mb:1 }}>Total&nbsp;Pot</Typography>
+             <Stack direction="row" spacing={2} alignItems="center">
+               <TextField
+                 size="small"
+                 value={totalPot}
+                 onChange={(e) => setTotalPot(e.target.value)}
+                 placeholder='e.g. "100" or "Donations only"'
+               />
+               <Button variant="contained" onClick={handleUpdatePot}>
+                 Update&nbsp;Pot
+               </Button>
+             </Stack>
+           </Box>
+   
+           {/* ── Payout Structure ──────────────────────────────── */}
+           <Typography variant="subtitle1" sx={{ mb:1 }}>
+             Payouts (fractions of&nbsp;1.0)
+           </Typography>
+   
+           <Stack
+             direction={{ xs:"column", sm:"row" }}
+             spacing={2}
+             sx={{ mb:2 }}
+           >
+             <TextField label="Q1"    size="small" type="number"
+                        value={q1}    onChange={(e)=>setQ1(e.target.value)} />
+             <TextField label="Q2"    size="small" type="number"
+                        value={q2}    onChange={(e)=>setQ2(e.target.value)} />
+             <TextField label="Q3"    size="small" type="number"
+                        value={q3}    onChange={(e)=>setQ3(e.target.value)} />
+             <TextField label="Final" size="small" type="number"
+                        value={final} onChange={(e)=>setFinal(e.target.value)} />
+           </Stack>
+   
+           <Button variant="contained" onClick={handleUpdatePayouts}>
+             Update&nbsp;Payouts
+           </Button>
+         </CardContent>
+       </Card>
+     );
+   }
+   

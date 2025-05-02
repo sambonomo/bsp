@@ -1,196 +1,115 @@
-// /src/routes/AppRoutes.js
+import React, { lazy, Suspense, useEffect, useRef } from "react";
+import {
+  Routes,
+  Route,
+  Navigate,
+  Link as RouterLink,
+} from "react-router-dom";
+import {
+  Box,
+  CircularProgress,
+  Typography,
+  Button,
+  Fade,
+} from "@mui/material";
 
-import React, { useEffect, useRef, useState, lazy, Suspense } from "react";
-import { Routes, Route, Navigate, Link as RouterLink } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { getAnalyticsService } from "../firebase/config";
 import { logEvent } from "firebase/analytics";
-import { Box, Typography, Button, CircularProgress, Fade } from "@mui/material";
 
-// Lazy-loaded Pages
-const LandingPage = lazy(() => import("../pages/LandingPage"));
-const LoginPage = lazy(() => import("../pages/LoginPage"));
-const SignupPage = lazy(() => import("../pages/SignupPage"));
-const Dashboard = lazy(() => import("../pages/Dashboard"));
+/* ───────── lazy-loaded pages ───────── */
+const LandingPage      = lazy(() => import("../pages/LandingPage"));
+const AboutPage        = lazy(() => import("../pages/AboutPage"));
+const LoginPage        = lazy(() => import("../pages/LoginPage"));
+const SignupPage       = lazy(() => import("../pages/SignupPage"));
+const Dashboard        = lazy(() => import("../pages/Dashboard"));
 const CreatePoolWizard = lazy(() => import("../pages/CreatePoolWizard"));
-const JoinPool = lazy(() => import("../pages/JoinPool"));
+const JoinPool         = lazy(() => import("../pages/JoinPool"));
 const SubscriptionPage = lazy(() => import("../pages/SubscriptionPage"));
-const TOSPage = lazy(() => import("../pages/TOSPage"));
-const Account = lazy(() => import("../pages/Account"));
-const ChangePassword = lazy(() => import("../pages/ChangePassword"));
-const PoolList = lazy(() => import("../components/pools/PoolList"));
+const TOSPage          = lazy(() => import("../pages/TOSPage"));
+const Account          = lazy(() => import("../pages/Account"));
+const ChangePassword   = lazy(() => import("../pages/ChangePassword"));
+const PoolList         = lazy(() => import("../components/pools/PoolList"));
+const PoolView         = lazy(() => import("../pages/PoolView"));
 
-// Use your single “PoolView” component for the /pool/:poolId route
-const PoolView = lazy(() => import("../pages/PoolView"));
+/* ───────── commissioner layout & pages ───────── */
+const CommissionerLayout = lazy(() => import("../pages/Commissioner/CommissionerLayout"));
+const CommOverviewPage   = lazy(() => import("../pages/Commissioner/pages/CommissionerOverviewPage"));
+const CommPotPage        = lazy(() => import("../pages/Commissioner/pages/CommissionerPotPage"));
+const CommRulesPage      = lazy(() => import("../pages/Commissioner/pages/CommissionerRulesPage"));
+const CommBrandingPage   = lazy(() => import("../pages/Commissioner/pages/CommissionerBrandingPage"));
+const CommMatchupsPage   = lazy(() => import("../pages/Commissioner/pages/CommissionerMatchupsPage"));
+const CommMembersPage    = lazy(() => import("../pages/Commissioner/pages/CommissionerMembersPage")); // NEW
+const CommToolsPage      = lazy(() => import("../pages/Commissioner/pages/CommissionerToolsPage"));
 
-// Import CommissionerDashboard for /commissioner/:poolId
-const CommissionerDashboard = lazy(() =>
-  import("../pages/Commissioner/CommissionerDashboard")
-);
-
-/**
- * Restrict access to authenticated users
- */
-function ProtectedRoute({ element }) {
+/* ───────── route guards ───────── */
+function ProtectedRoute({ children }) {
   const { user, authLoading } = useAuth();
-  const [analytics, setAnalytics] = useState(null);
-  const hasLoggedUnauthorized = useRef(false);
+  const analytics  = getAnalyticsService();
+  const loggedOnce = useRef(false);
 
   useEffect(() => {
-    const analyticsInstance = getAnalyticsService();
-    setAnalytics(analyticsInstance);
-  }, []);
-
-  useEffect(() => {
-    if (!authLoading && !user && !hasLoggedUnauthorized.current) {
-      if (analytics) {
-        logEvent(analytics, "unauthorized_access_attempt", {
-          userId: user?.uid || "anonymous",
-          path: window.location.pathname,
-          timestamp: new Date().toISOString(),
-        });
-        console.log("ProtectedRoute - Unauthorized access attempt logged");
-        hasLoggedUnauthorized.current = true;
-      }
-
-      // Accessibility announcement
-      const announcement =
-        "You are being redirected to the login page because you are not authenticated.";
-      const liveRegion = document.createElement("div");
-      liveRegion.setAttribute("aria-live", "assertive");
-      liveRegion.setAttribute("role", "alert");
-      liveRegion.style.position = "absolute";
-      liveRegion.style.width = "1px";
-      liveRegion.style.height = "1px";
-      liveRegion.style.overflow = "hidden";
-      liveRegion.style.clip = "rect(0, 0, 0, 0)";
-      liveRegion.innerText = announcement;
-      document.body.appendChild(liveRegion);
-      setTimeout(() => document.body.removeChild(liveRegion), 1000);
+    if (!authLoading && !user && analytics && !loggedOnce.current) {
+      logEvent(analytics, "unauthorized_access_attempt", {
+        userId: "anonymous",
+        path: window.location.pathname,
+        timestamp: Date.now(),
+      });
+      loggedOnce.current = true;
     }
   }, [authLoading, user, analytics]);
 
-  useEffect(() => {
-    hasLoggedUnauthorized.current = false;
-  }, [user?.uid]);
-
   if (authLoading) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
-        <CircularProgress size={24} aria-label="Loading authentication state" />
+      <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+        <CircularProgress size={28} />
       </Box>
     );
   }
 
-  if (!user) {
-    return <Navigate to="/login" replace state={{ from: window.location.pathname }} />;
-  }
-
-  return element;
+  return user ? children : <Navigate to="/login" replace state={{ from: window.location.pathname }} />;
 }
 
-/**
- * Redirect authenticated users away from login/signup pages
- */
-function PublicRoute({ element }) {
+function PublicRoute({ children }) {
   const { user, authLoading } = useAuth();
 
   if (authLoading) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
-        <CircularProgress size={24} aria-label="Loading authentication state" />
+      <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+        <CircularProgress size={28} />
       </Box>
     );
   }
 
-  if (user) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
-  return element;
+  return user ? <Navigate to="/dashboard" replace /> : children;
 }
 
-/**
- * 404 Page
- */
+/* ───────── simple 404 ───────── */
 function NotFoundPage() {
-  const { user } = useAuth();
-  const [analytics, setAnalytics] = useState(null);
-  const hasLoggedNotFound = useRef(false);
+  const analytics = getAnalyticsService();
 
   useEffect(() => {
-    const analyticsInstance = getAnalyticsService();
-    setAnalytics(analyticsInstance);
-  }, []);
-
-  useEffect(() => {
-    if (!hasLoggedNotFound.current && analytics) {
+    analytics &&
       logEvent(analytics, "page_not_found", {
-        userId: user?.uid || "anonymous",
+        userId: "anonymous",
         path: window.location.pathname,
-        timestamp: new Date().toISOString(),
+        timestamp: Date.now(),
       });
-      console.log("AppRoutes - 404 error logged to Firebase Analytics");
-      hasLoggedNotFound.current = true;
-    }
-  }, [user?.uid, analytics]);
+  }, [analytics]);
 
   return (
-    <Box
-      sx={{ py: 4, textAlign: "center" }}
-      role="alert"
-      aria-label="Page not found"
-    >
-      <Typography
-        variant="h4"
-        sx={{
-          mb: 2,
-          fontWeight: 700,
-          fontFamily: "'Montserrat', sans-serif'",
-          color: (theme) => theme.palette.text.primary,
-        }}
-      >
-        404 - Page Not Found
+    <Box sx={{ py: 6, textAlign: "center" }}>
+      <Typography variant="h4" sx={{ mb: 2, fontWeight: 700 }}>
+        404 – Page Not Found
       </Typography>
-      <Typography
-        variant="body1"
-        sx={{
-          mb: 3,
-          fontFamily: "'Poppins', sans-serif'",
-          color: (theme) => theme.palette.text.secondary,
-        }}
-      >
-        The page you're looking for doesn't exist or has been moved.
+      <Typography variant="body1" sx={{ mb: 3 }}>
+        The page you’re looking for doesn’t exist or has been moved.
       </Typography>
       <Box sx={{ display: "flex", gap: 2, justifyContent: "center" }}>
-        <Button
-          component={RouterLink}
-          to="/"
-          variant="contained"
-          color="primary"
-          sx={{
-            px: 4,
-            py: 1.5,
-            borderRadius: 2,
-            fontFamily: "'Poppins', sans-serif'",
-          }}
-          aria-label="Go to home page"
-        >
-          Go to Home
+        <Button component={RouterLink} to="/" variant="contained">
+          Home
         </Button>
-        <Button
-          component={RouterLink}
-          to="/pools"
-          variant="outlined"
-          color="primary"
-          sx={{
-            px: 4,
-            py: 1.5,
-            borderRadius: 2,
-            fontFamily: "'Poppins', sans-serif'",
-          }}
-          aria-label="Go to pool list"
-        >
+        <Button component={RouterLink} to="/pools" variant="outlined">
           View Pools
         </Button>
       </Box>
@@ -198,69 +117,52 @@ function NotFoundPage() {
   );
 }
 
-/**
- * Main Application Routes
- */
+/* ───────── main route tree ───────── */
 export default function AppRoutes() {
   return (
     <Suspense
       fallback={
-        <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
-          <CircularProgress size={24} aria-label="Loading page" />
+        <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+          <CircularProgress size={32} />
         </Box>
       }
     >
-      <Fade in timeout={500}>
+      <Fade in timeout={400}>
         <Box role="main">
           <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<PublicRoute element={<LoginPage />} />} />
-            <Route path="/signup" element={<PublicRoute element={<SignupPage />} />} />
-            <Route path="/tos" element={<TOSPage />} />
+            {/* public */}
+            <Route path="/"          element={<LandingPage />} />
+            <Route path="/about"     element={<AboutPage   />} />
+            <Route path="/tos"       element={<TOSPage     />} />
+            <Route path="/join"      element={<JoinPool    />} />
+            <Route path="/pools"     element={<PoolList    />} />
+
+            <Route path="/login"  element={<PublicRoute><LoginPage  /></PublicRoute>} />
+            <Route path="/signup" element={<PublicRoute><SignupPage /></PublicRoute>} />
+
+            {/* protected user routes */}
+            <Route path="/dashboard"    element={<ProtectedRoute><Dashboard        /></ProtectedRoute>} />
+            <Route path="/create-pool"  element={<ProtectedRoute><CreatePoolWizard /></ProtectedRoute>} />
+            <Route path="/pool/:poolId" element={<ProtectedRoute><PoolView         /></ProtectedRoute>} />
+            <Route path="/subscription" element={<ProtectedRoute><SubscriptionPage /></ProtectedRoute>} />
+            <Route path="/account"      element={<ProtectedRoute><Account          /></ProtectedRoute>} />
+            <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
+
+            {/* commissioner area */}
             <Route
-              path="/subscription"
-              element={<ProtectedRoute element={<SubscriptionPage />} />}
-            />
-            <Route path="/join" element={<JoinPool />} />
+              path="/commissioner/:poolId/*"
+              element={<ProtectedRoute><CommissionerLayout /></ProtectedRoute>}
+            >
+              <Route index           element={<CommOverviewPage />} />
+              <Route path="pot"      element={<CommPotPage      />} />
+              <Route path="rules"    element={<CommRulesPage    />} />
+              <Route path="branding" element={<CommBrandingPage />} />
+              <Route path="matchups" element={<CommMatchupsPage />} />
+              <Route path="members"  element={<CommMembersPage  />} /> {/* NEW */}
+              <Route path="tools"    element={<CommToolsPage    />} />
+            </Route>
 
-            {/* Pool List */}
-            <Route path="/pools" element={<PoolList />} />
-
-            {/* Protected Routes (must be authenticated) */}
-            <Route
-              path="/dashboard"
-              element={<ProtectedRoute element={<Dashboard />} />}
-            />
-            <Route
-              path="/create-pool"
-              element={<ProtectedRoute element={<CreatePoolWizard />} />}
-            />
-
-            {/* Single Pool View */}
-            <Route
-              path="/pool/:poolId"
-              element={<ProtectedRoute element={<PoolView />} />}
-            />
-
-            {/* Commissioner Dashboard */}
-            <Route
-              path="/commissioner/:poolId"
-              element={<ProtectedRoute element={<CommissionerDashboard />} />}
-            />
-
-            {/*
-              Old references to "PoolDashboard" or "ManagePool" or
-              "CommissionerSettingsPage" are removed.
-            */}
-
-            <Route path="/account" element={<ProtectedRoute element={<Account />} />} />
-            <Route
-              path="/change-password"
-              element={<ProtectedRoute element={<ChangePassword />} />}
-            />
-
-            {/* 404 Catch-All */}
+            {/* catch-all */}
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Box>
