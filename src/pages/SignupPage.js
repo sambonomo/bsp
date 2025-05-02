@@ -1,658 +1,296 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useAuth } from "../contexts/AuthContext";
-import { useNavigate, useLocation, Link as RouterLink } from "react-router-dom";
-import { doc, setDoc } from "firebase/firestore";
-import {
-  getDb,
-  getAnalyticsService,
-  getAuthService,
-} from "../firebase/config"; // Updated imports
-import {
-  setPersistence,
-  browserLocalPersistence,
-  browserSessionPersistence,
-} from "firebase/auth";
-import { logEvent } from "firebase/analytics";
-import {
-  Container,
-  Paper,
-  Box,
-  Typography,
-  TextField,
-  Button,
-  Alert,
-  Stack,
-  Snackbar,
-  CircularProgress,
-  InputAdornment,
-  IconButton,
-  Checkbox,
-  FormControlLabel,
-  Link,
-} from "@mui/material";
-import Visibility from "@mui/icons-material/Visibility";
-import VisibilityOff from "@mui/icons-material/VisibilityOff";
-
-function SignupPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(() => {
-    // Load "Remember Me" preference from localStorage on mount
-    return localStorage.getItem("rememberMe") === "true";
-  });
-  const [passwordStrength, setPasswordStrength] = useState("");
-  const [agreeToTerms, setAgreeToTerms] = useState(false);
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [analytics, setAnalytics] = useState(null); // State for analytics
-  const { signup, loginWithGoogle, currentUser, authLoading } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  // Initialize services
-  const db = getDb();
-  const auth = getAuthService();
-
-  // Tracking refs
-  const hasLoggedPageView = useRef(false);
-  const hasLoggedEmailSignupSuccess = useRef(false);
-  const hasLoggedGoogleSignupSuccess = useRef(false);
-  const hasLoggedGoogleSignupClick = useRef(false);
-  const hasLoggedTermsAccepted = useRef(false);
-  const hasLoggedRememberMe = useRef(false);
-  const hasLoggedRetryPerOperation = useRef({});
-  const redirectTimeoutRef = useRef(null);
-
-  // Initialize analytics
-  useEffect(() => {
-    const analyticsInstance = getAnalyticsService();
-    setAnalytics(analyticsInstance);
-  }, []);
-
-  // Track page view on mount (only once)
-  useEffect(() => {
-    if (!hasLoggedPageView.current && analytics) {
-      logEvent(analytics, "signup_page_viewed", {
-        userId: currentUser?.uid || "anonymous",
-        timestamp: new Date().toISOString(),
-      });
-      console.log("SignupPage - Page view logged to Firebase Analytics");
-      hasLoggedPageView.current = true;
-    }
-  }, [currentUser?.uid, analytics]);
-
-  // Redirect if already authenticated
-  useEffect(() => {
-    if (!authLoading && currentUser) {
-      const redirectTo = location.state?.from || "/dashboard";
-      navigate(redirectTo, { replace: true });
-    }
-  }, [authLoading, currentUser, navigate, location.state]);
-
-  // Cleanup redirect timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (redirectTimeoutRef.current) {
-        clearTimeout(redirectTimeoutRef.current);
-        redirectTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  // Reset analytics logging flags when user changes
-  useEffect(() => {
-    hasLoggedPageView.current = false;
-    hasLoggedEmailSignupSuccess.current = false;
-    hasLoggedGoogleSignupSuccess.current = false;
-    hasLoggedGoogleSignupClick.current = false;
-    hasLoggedTermsAccepted.current = false;
-    hasLoggedRememberMe.current = false;
-    hasLoggedRetryPerOperation.current = {};
-  }, [currentUser?.uid]);
-
-  // Password strength validation
-  const validatePasswordStrength = (pwd) => {
-    if (pwd.length < 8) return "Weak: Password must be at least 8 characters.";
-    if (!/[A-Z]/.test(pwd))
-      return "Weak: Password must contain at least one uppercase letter.";
-    if (!/[0-9]/.test(pwd))
-      return "Weak: Password must contain at least one number.";
-    if (!/[^A-Za-z0-9]/.test(pwd))
-      return "Weak: Password must contain at least one special character.";
+/* ------------------------------------------------------------------
+   src/pages/SignupPage.js          (FULL FILE – ready to paste)
+   ------------------------------------------------------------------ */
+   import React, {
+    useState, useEffect, useRef, useCallback, useMemo,
+  } from "react";
+  import { useNavigate, useLocation, Link as RouterLink } from "react-router-dom";
+  import {
+    Container, Paper, Box, Typography, TextField, Button, Alert, Stack,
+    Snackbar, CircularProgress, InputAdornment, IconButton, Checkbox,
+    FormControlLabel, Link,
+  } from "@mui/material";
+  import Visibility               from "@mui/icons-material/Visibility";
+  import VisibilityOff            from "@mui/icons-material/VisibilityOff";
+  
+  import {
+    browserLocalPersistence, browserSessionPersistence, setPersistence,
+  } from "firebase/auth";
+  import { doc, setDoc }          from "firebase/firestore";
+  import { logEvent }             from "firebase/analytics";
+  
+  import { useAuth }              from "../contexts/AuthContext";
+  import { getDb, getAuthService, getAnalyticsService } from "../firebase/config";
+  
+  /* ------------------------------------------------------------------ */
+  /* helpers                                                            */
+  /* ------------------------------------------------------------------ */
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  
+  const passwordStrengthMsg = (pwd = "") => {
+    if (pwd.length < 8)               return "Weak: min 8 characters.";
+    if (!/[A-Z]/.test(pwd))           return "Weak: add an uppercase letter.";
+    if (!/[0-9]/.test(pwd))           return "Weak: add a number.";
+    if (!/[^A-Za-z0-9]/.test(pwd))    return "Weak: add a special char.";
     return "Strong";
   };
-
-  const handlePasswordChange = (e) => {
-    const passwordValue = e.target.value;
-    setPassword(passwordValue);
-    setPasswordStrength(validatePasswordStrength(passwordValue));
-  };
-
-  // Handle terms checkbox toggle
-  const handleTermsToggle = (e) => {
-    const checked = e.target.checked;
-    setAgreeToTerms(checked);
-    if (checked && !hasLoggedTermsAccepted.current && analytics) {
-      logEvent(analytics, "terms_accepted", {
-        userId: currentUser?.uid || "anonymous",
-        timestamp: new Date().toISOString(),
-      });
-      console.log("SignupPage - Terms accepted logged to Firebase Analytics");
-      hasLoggedTermsAccepted.current = true;
-    }
-  };
-
-  // Handle remember me toggle and persist to localStorage
-  const handleRememberMeToggle = (e) => {
-    const checked = e.target.checked;
-    setRememberMe(checked);
-    localStorage.setItem("rememberMe", checked.toString());
-    console.log(`SignupPage - Remember Me set to ${checked}`);
-    if (!hasLoggedRememberMe.current && analytics) {
-      logEvent(analytics, "remember_me_toggled", {
-        userId: currentUser?.uid || "anonymous",
-        enabled: checked,
-        timestamp: new Date().toISOString(),
-      });
-      console.log("SignupPage - Remember me toggle logged to Firebase Analytics");
-      hasLoggedRememberMe.current = true;
-    }
-  };
-
-  // Retry logic for Firebase operations
-  const withRetry = async (
-    operation,
-    callback,
-    maxRetries = 3,
-    retryDelayBase = 1000
-  ) => {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  
+  /* ------------------------------------------------------------------ */
+  /* component                                                          */
+  /* ------------------------------------------------------------------ */
+  export default function SignupPage() {
+    /* services & hooks */
+    const {
+      signup, loginWithGoogle, currentUser, authLoading,
+    } = useAuth();
+    const navigate      = useNavigate();
+    const location      = useLocation();
+    const db            = getDb();
+    const auth          = getAuthService();
+    const analyticsRef  = useRef(getAnalyticsService());
+  
+    /* local state */
+    const [email,      setEmail]      = useState("");
+    const [password,   setPassword]   = useState("");
+    const [showPwd,    setShowPwd]    = useState(false);
+    const [rememberMe, setRememberMe] = useState(
+      localStorage.getItem("rememberMe") === "true",
+    );
+    const [agree,      setAgree]      = useState(false);
+    const [pwdMsg,     setPwdMsg]     = useState("");
+    const [error,      setError]      = useState("");
+    const [success,    setSuccess]    = useState("");
+    const [loading,    setLoading]    = useState(false);
+  
+    /* once-per-event logger */
+    const logged = useRef({});
+    const logOnce = useCallback((evt, data = {}) => {
+      if (!logged.current[evt] && analyticsRef.current) {
+        logEvent(analyticsRef.current, evt, {
+          userId: currentUser?.uid || "anonymous",
+          ts: Date.now(),
+          ...data,
+        });
+        logged.current[evt] = true;
+      }
+    }, [currentUser?.uid]);
+  
+    /* page view */
+    useEffect(() => { logOnce("signup_page_viewed"); }, [logOnce]);
+  
+    /* redirect */
+    useEffect(() => {
+      if (!authLoading && currentUser) {
+        navigate(location.state?.from || "/dashboard", { replace: true });
+      }
+    }, [authLoading, currentUser, navigate, location.state]);
+  
+    /* timer cleanup */
+    const timerRef = useRef(null);
+    useEffect(() => () => timerRef.current && clearTimeout(timerRef.current), []);
+  
+    /* handlers */
+    const handlePwdChange = (e) => {
+      const val = e.target.value;
+      setPassword(val);
+      setPwdMsg(passwordStrengthMsg(val));
+    };
+  
+    const toggleRemember = (e) => {
+      const val = e.target.checked;
+      setRememberMe(val);
+      localStorage.setItem("rememberMe", String(val));
+      logOnce("remember_me_toggled", { enabled: val });
+    };
+  
+    const toggleAgree = (e) => {
+      const val = e.target.checked;
+      setAgree(val);
+      if (val) logOnce("terms_accepted");
+    };
+  
+    /* retry helper (simplified JS) */
+    const withRetry = useCallback(
+      async (op, fn, retries = 3) => {
+        for (let i = 1; i <= retries; i += 1) {
+          try { return await fn(); }
+          catch (err) {
+            logOnce("firebase_retry", { op, attempt: i, code: err?.code });
+            if (i === retries) throw err;
+            await new Promise((r) => setTimeout(r, 2 ** (i - 1) * 1_000));
+          }
+        }
+        // eslint-disable-next-line consistent-return
+        return null;
+      },
+      [logOnce],
+    );
+  
+    /* EMAIL SIGN-UP -------------------------------------------------- */
+    const handleEmailSignup = async (e) => {
+      e.preventDefault();
+      setError(""); setSuccess("");
+  
+      if (!emailRegex.test(email))            return setError("Enter a valid email.");
+      if (pwdMsg.startsWith("Weak"))          return setError(pwdMsg);
+      if (!agree)                             return setError("Please accept the terms.");
+  
+      setLoading(true);
       try {
-        return await callback();
-      } catch (error) {
-        // Log retry event only once per operation
-        if (!hasLoggedRetryPerOperation.current[operation] && analytics) {
-          logEvent(analytics, "firebase_operation_retry", {
-            userId: currentUser?.uid || "anonymous",
-            operation,
-            attempt,
-            error_message: error.message,
-            timestamp: new Date().toISOString(),
-          });
-          console.log(
-            `SignupPage - ${operation} retry attempt ${attempt} logged to Firebase Analytics`
-          );
-          hasLoggedRetryPerOperation.current[operation] = true;
-        }
-        if (attempt === maxRetries) {
-          throw error;
-        }
-        const delay = Math.pow(2, attempt - 1) * retryDelayBase;
-        console.log(
-          `${operation} - Attempt ${attempt} failed: ${error.message}. Retrying in ${delay}ms...`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
-  };
-
-  // Email/Password signup
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-
-    // Basic input validation
-    if (!email || !password) {
-      setError("Please enter both email and password.");
-      setLoading(false);
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setError("Please enter a valid email address.");
-      setLoading(false);
-      return;
-    }
-
-    if (passwordStrength.includes("Weak")) {
-      setError(passwordStrength);
-      setLoading(false);
-      return;
-    }
-
-    // Check if terms are accepted
-    if (!agreeToTerms) {
-      setError(
-        "You must agree to the Terms of Service and Privacy Policy to sign up."
+        const persist = rememberMe ? browserLocalPersistence : browserSessionPersistence;
+        await withRetry("setPersistence", () => setPersistence(auth, persist));
+  
+        const cred = await withRetry("signup", () => signup(email, password));
+  
+        await withRetry("createUserDoc", () => setDoc(
+          doc(db, "users", cred.user.uid),
+          { email, subscriptionTier: "Bronze", createdAt: new Date() },
+        ));
+  
+        logOnce("signup_success", { method: "email" });
+        setSuccess("Account created! Redirecting…");
+        timerRef.current = setTimeout(() => navigate("/dashboard"), 1_500);
+      } catch (err) {
+        const map = {
+          "auth/email-already-in-use": "Email already in use.",
+          "auth/weak-password":        "Password too weak.",
+          "auth/invalid-email":        "Invalid email address.",
+        };
+        setError(map[err.code] || "Unable to sign up.");
+        logOnce("signup_failed", { method: "email", code: err.code });
+      } finally { setLoading(false); }
+    };
+  
+    /* GOOGLE SIGN-UP ------------------------------------------------- */
+    const handleGoogleSignup = async () => {
+      setError(""); setSuccess(""); setLoading(true);
+      if (!agree) { setError("Please accept the terms."); setLoading(false); return; }
+  
+      logOnce("google_signup_clicked");
+      try {
+        const persist = rememberMe ? browserLocalPersistence : browserSessionPersistence;
+        await withRetry("setPersistence", () => setPersistence(auth, persist));
+  
+        await withRetry("googleSignup", loginWithGoogle);
+  
+        logOnce("signup_success", { method: "google" });
+        setSuccess("Account created! Redirecting…");
+        timerRef.current = setTimeout(() => navigate("/dashboard"), 1_200);
+      } catch (err) {
+        const map = {
+          "auth/popup-closed-by-user": "Google popup closed.",
+          "auth/popup-blocked":        "Popup blocked – enable pop-ups.",
+        };
+        setError(map[err.code] || "Google signup failed.");
+        logOnce("signup_failed", { method: "google", code: err.code });
+      } finally { setLoading(false); }
+    };
+  
+    /* derived */
+    const btnDisabled = useMemo(
+      () => loading || !agree || !email || !password,
+      [loading, agree, email, password],
+    );
+  
+    /* render ---------------------------------------------------------------- */
+    if (authLoading) {
+      return (
+        <Container maxWidth="xs" sx={{ mt: 10, textAlign: "center" }}>
+          <CircularProgress />
+        </Container>
       );
-      setLoading(false);
-      return;
     }
-
-    try {
-      // Set persistence
-      const persistenceType = rememberMe
-        ? browserLocalPersistence
-        : browserSessionPersistence;
-      await withRetry("Set Persistence (Email)", () =>
-        setPersistence(auth, persistenceType)
-      );
-      console.log(
-        `SignupPage - Set persistence to ${
-          rememberMe ? "LOCAL" : "SESSION"
-        }`
-      );
-
-      // 1. Create the user in Firebase Auth
-      const userCredential = await withRetry("Email/Password Signup", () =>
-        signup(email, password)
-      );
-
-      // Double-check userCredential before proceeding
-      if (!userCredential || !userCredential.user || !userCredential.user.uid) {
-        throw new Error("No user information returned from signup.");
-      }
-
-      // 2. Create user doc in Firestore
-      await withRetry("Create User Doc", () =>
-        setDoc(doc(db, "users", userCredential.user.uid), {
-          email,
-          subscriptionTier: "Bronze",
-          createdAt: new Date(),
-        })
-      );
-
-      // Log email signup success (only once)
-      if (!hasLoggedEmailSignupSuccess.current && analytics) {
-        logEvent(analytics, "signup_success", {
-          method: "email",
-          userId: userCredential.user.uid,
-          timestamp: new Date().toISOString(),
-        });
-        console.log(
-          "SignupPage - Email signup success logged to Firebase Analytics"
-        );
-        hasLoggedEmailSignupSuccess.current = true;
-      }
-
-      // 3. Show success message and navigate
-      setSuccessMessage("Account created successfully! Redirecting...");
-      redirectTimeoutRef.current = setTimeout(() => {
-        navigate("/dashboard");
-        redirectTimeoutRef.current = null;
-      }, 2000);
-    } catch (err) {
-      let userFriendlyError = "Failed to create an account. Please try again.";
-      if (err.code === "auth/email-already-in-use") {
-        userFriendlyError =
-          "This email is already in use. Please use a different email.";
-      } else if (err.code === "auth/invalid-email") {
-        userFriendlyError = "Invalid email address.";
-      } else if (err.code === "auth/weak-password") {
-        userFriendlyError =
-          "Password is too weak. Please use a stronger password.";
-      } else if (err.code === "auth/too-many-requests") {
-        userFriendlyError = "Too many attempts. Please try again later.";
-      } else if (err.code === "auth/network-request-failed") {
-        userFriendlyError =
-          "Network error. Please check your connection and try again.";
-      }
-
-      setError(userFriendlyError);
-
-      // Log signup failure
-      if (analytics) {
-        logEvent(analytics, "signup_failed", {
-          method: "email",
-          userId: currentUser?.uid || "anonymous",
-          error_message: userFriendlyError,
-          error_code: err.code || "unknown",
-          timestamp: new Date().toISOString(),
-        });
-        console.log("SignupPage - Email signup failure logged to Firebase Analytics");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Google sign-up
-  const handleGoogleSignUp = async () => {
-    setError("");
-    setLoading(true);
-
-    // Log Google signup click (only once)
-    if (!hasLoggedGoogleSignupClick.current && analytics) {
-      logEvent(analytics, "google_signup_clicked", {
-        userId: currentUser?.uid || "anonymous",
-        timestamp: new Date().toISOString(),
-      });
-      console.log("SignupPage - Google signup click logged to Firebase Analytics");
-      hasLoggedGoogleSignupClick.current = true;
-    }
-
-    // Check if terms are accepted for Google signup
-    if (!agreeToTerms) {
-      setError(
-        "You must agree to the Terms of Service and Privacy Policy to sign up."
-      );
-      setLoading(false);
-      return;
-    }
-
-    try {
-      // Set persistence
-      const persistenceType = rememberMe
-        ? browserLocalPersistence
-        : browserSessionPersistence;
-      await withRetry("Set Persistence (Google)", () =>
-        setPersistence(auth, persistenceType)
-      );
-      console.log(
-        `SignupPage - Set persistence to ${
-          rememberMe ? "LOCAL" : "SESSION"
-        } for Google signup`
-      );
-
-      // loginWithGoogle automatically creates or updates the user doc
-      const userCredential = await withRetry("Google Signup", () =>
-        loginWithGoogle()
-      );
-
-      // Double-check userCredential
-      if (!userCredential || !userCredential.user || !userCredential.user.uid) {
-        throw new Error("No user information returned from Google signup.");
-      }
-
-      // Log Google signup success (only once)
-      if (!hasLoggedGoogleSignupSuccess.current && analytics) {
-        logEvent(analytics, "signup_success", {
-          method: "google",
-          userId: userCredential.user.uid,
-          timestamp: new Date().toISOString(),
-        });
-        console.log(
-          "SignupPage - Google signup success logged to Firebase Analytics"
-        );
-        hasLoggedGoogleSignupSuccess.current = true;
-      }
-
-      setSuccessMessage("Account created successfully! Redirecting...");
-      redirectTimeoutRef.current = setTimeout(() => {
-        navigate("/dashboard");
-        redirectTimeoutRef.current = null;
-      }, 2000);
-    } catch (err) {
-      let userFriendlyError = "Failed to sign up with Google. Please try again.";
-      if (err.code === "auth/popup-closed-by-user") {
-        userFriendlyError = "Google sign-up popup closed. Please try again.";
-      } else if (err.code === "auth/too-many-requests") {
-        userFriendlyError = "Too many attempts. Please try again later.";
-      } else if (err.code === "auth/network-request-failed") {
-        userFriendlyError =
-          "Network error. Please check your connection and try again.";
-      } else if (err.code === "auth/popup-blocked") {
-        userFriendlyError =
-          "Popup blocked by browser. Please allow popups and try again.";
-      }
-
-      setError(userFriendlyError);
-
-      // Log Google signup failure
-      if (analytics) {
-        logEvent(analytics, "signup_failed", {
-          method: "google",
-          userId: currentUser?.uid || "anonymous",
-          error_message: userFriendlyError,
-          error_code: err.code || "unknown",
-          timestamp: new Date().toISOString(),
-        });
-        console.log("SignupPage - Google signup failure logged to Firebase Analytics");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Show loading UI while auth state is resolving
-  if (authLoading) {
+    if (currentUser) return null;
+  
     return (
-      <Container maxWidth="xs" sx={{ mt: 8, textAlign: "center" }}>
-        <Typography
-          variant="body1"
-          sx={{
-            mb: 2,
-            fontFamily: "'Poppins', sans-serif",
-            color: "text.secondary",
-          }}
-        >
-          Loading authentication state...
-        </Typography>
-        <CircularProgress
-          sx={{ color: "primary.main" }}
-          aria-label="Loading authentication state"
-        />
+      <Container maxWidth="xs" sx={{ mt: 8 }}>
+        <Paper elevation={3} sx={{ p: 3, borderRadius: 3 }}>
+          <Box textAlign="center" mb={2}>
+            <Typography variant="h5" fontWeight={700} mb={1}>
+              Sign&nbsp;Up
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Create your BSP account and start hosting pools!
+            </Typography>
+          </Box>
+  
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }} aria-live="assertive">
+              {error}
+            </Alert>
+          )}
+          <Snackbar
+            open={!!success}
+            autoHideDuration={3_000}
+            onClose={() => setSuccess("")}
+            anchorOrigin={{ vertical: "top", horizontal: "center" }}
+          >
+            <Alert severity="success" sx={{ width: "100%" }}>
+              {success}
+            </Alert>
+          </Snackbar>
+  
+          {/* form */}
+          <Box component="form" onSubmit={handleEmailSignup} noValidate sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <TextField
+              type="email" label="Email" required fullWidth value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <TextField
+              type={showPwd ? "text" : "password"} label="Password" required fullWidth
+              value={password} onChange={handlePwdChange} helperText={pwdMsg}
+              FormHelperTextProps={{
+                sx: { color: pwdMsg.startsWith("Weak") ? "error.main" : "success.main" },
+              }}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      onClick={() => setShowPwd((p) => !p)}
+                      aria-label={showPwd ? "Hide password" : "Show password"}
+                    >
+                      {showPwd ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+            />
+  
+            <FormControlLabel
+              control={<Checkbox checked={rememberMe} onChange={toggleRemember} />}
+              label="Remember Me"
+            />
+            <FormControlLabel
+              control={<Checkbox checked={agree} onChange={toggleAgree} required />}
+              label={(
+                <Typography variant="body2">
+                  I agree to the&nbsp;
+                  <Link component={RouterLink} to="/tos">Terms of Service</Link>
+                  &nbsp;and&nbsp;
+                  <Link component={RouterLink} to="/privacy">Privacy Policy</Link>
+                </Typography>
+              )}
+            />
+  
+            <Button
+              type="submit" variant="contained" disabled={btnDisabled}
+              aria-label="Email signup"
+            >
+              {loading ? "Signing Up…" : "Sign Up"}
+            </Button>
+          </Box>
+  
+          {/* google */}
+          <Stack direction="row" justifyContent="center" mt={3}>
+            <Button
+              variant="outlined" color="secondary" disabled={loading || !agree}
+              onClick={handleGoogleSignup}
+            >
+              Sign&nbsp;Up&nbsp;with&nbsp;Google
+            </Button>
+          </Stack>
+        </Paper>
       </Container>
     );
   }
-
-  // Redirect if already authenticated (handled in useEffect as well)
-  if (currentUser) {
-    return null;
-  }
-
-  return (
-    <Container maxWidth="xs" sx={{ mt: 8 }}>
-      <Paper elevation={3} sx={{ p: 3 }}>
-        <Box sx={{ textAlign: "center", mb: 2 }}>
-          <Typography
-            variant="h5"
-            sx={{
-              fontFamily: "'Montserrat', sans-serif",
-              mb: 1,
-              fontWeight: 700,
-            }}
-          >
-            Sign Up
-          </Typography>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ fontFamily: "'Poppins', sans-serif" }}
-          >
-            Create your BSP account and start hosting pools!
-          </Typography>
-        </Box>
-
-        {error && (
-          <Alert
-            severity="error"
-            sx={{ mb: 2, fontFamily: "'Poppins', sans-serif" }}
-            role="alert"
-            id="signup-error"
-            aria-live="assertive"
-          >
-            {error}
-          </Alert>
-        )}
-
-        <Snackbar
-          open={!!successMessage}
-          autoHideDuration={3000}
-          onClose={() => setSuccessMessage("")}
-          anchorOrigin={{ vertical: "top", horizontal: "center" }}
-        >
-          <Alert
-            severity="success"
-            sx={{ fontFamily: "'Poppins', sans-serif" }}
-            role="alert"
-            aria-live="assertive"
-          >
-            {successMessage}
-          </Alert>
-        </Snackbar>
-
-        {/* Email/Password Form */}
-        <Box
-          component="form"
-          onSubmit={handleSubmit}
-          sx={{ display: "flex", flexDirection: "column", gap: 2 }}
-        >
-          <TextField
-            type="email"
-            label="Email"
-            variant="outlined"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            fullWidth
-            InputProps={{
-              sx: { fontFamily: "'Poppins', sans-serif" },
-            }}
-            InputLabelProps={{
-              sx: { fontFamily: "'Poppins', sans-serif" },
-              id: "signup-email-label",
-            }}
-            inputProps={{
-              "aria-label": "Enter your email address",
-              "aria-describedby": error
-                ? "signup-error signup-email-label"
-                : "signup-email-label",
-            }}
-            disabled={loading}
-          />
-          <TextField
-            type={showPassword ? "text" : "password"}
-            label="Password"
-            variant="outlined"
-            value={password}
-            onChange={handlePasswordChange}
-            required
-            fullWidth
-            helperText={passwordStrength}
-            FormHelperTextProps={{
-              sx: {
-                fontFamily: "'Poppins', sans-serif",
-                color: passwordStrength.includes("Weak")
-                  ? "error.main"
-                  : "success.main",
-              },
-              id: "password-helper-text",
-            }}
-            InputProps={{
-              sx: { fontFamily: "'Poppins', sans-serif" },
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton
-                    onClick={() => setShowPassword(!showPassword)}
-                    edge="end"
-                    aria-label={
-                      showPassword ? "Hide password" : "Show password"
-                    }
-                  >
-                    {showPassword ? <VisibilityOff /> : <Visibility />}
-                  </IconButton>
-                </InputAdornment>
-              ),
-            }}
-            InputLabelProps={{
-              sx: { fontFamily: "'Poppins', sans-serif" },
-              id: "signup-password-label",
-            }}
-            inputProps={{
-              "aria-label": "Enter your password",
-              "aria-describedby": error
-                ? "signup-error signup-password-label password-helper-text"
-                : "signup-password-label password-helper-text",
-            }}
-            disabled={loading}
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={rememberMe}
-                onChange={handleRememberMeToggle}
-                color="primary"
-                disabled={loading}
-                inputProps={{ "aria-label": "Remember me checkbox" }}
-              />
-            }
-            label="Remember Me"
-            sx={{ fontFamily: "'Poppins', sans-serif" }}
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={agreeToTerms}
-                onChange={handleTermsToggle}
-                color="primary"
-                required
-                disabled={loading}
-                inputProps={{
-                  "aria-label":
-                    "Agree to Terms of Service and Privacy Policy checkbox",
-                }}
-              />
-            }
-            label={
-              <Typography
-                variant="body2"
-                sx={{ fontFamily: "'Poppins', sans-serif" }}
-              >
-                I agree to the{" "}
-                <Link
-                  component={RouterLink}
-                  to="/tos"
-                  sx={{ textDecoration: "none" }}
-                  aria-label="Terms of Service"
-                >
-                  Terms of Service
-                </Link>{" "}
-                and{" "}
-                <Link
-                  component={RouterLink}
-                  to="/privacy"
-                  sx={{ textDecoration: "none" }}
-                  aria-label="Privacy Policy"
-                >
-                  Privacy Policy
-                </Link>
-              </Typography>
-            }
-            sx={{ mb: 1 }}
-          />
-          <Button
-            type="submit"
-            variant="contained"
-            color="primary"
-            sx={{ fontFamily: "'Poppins', sans-serif" }}
-            disabled={loading || !agreeToTerms}
-            aria-label="Sign up with email and password"
-          >
-            {loading ? "Signing Up..." : "Sign Up"}
-          </Button>
-        </Box>
-
-        {/* Google Sign-Up Button */}
-        <Stack direction="row" sx={{ mt: 3 }} spacing={2} justifyContent="center">
-          <Button
-            variant="outlined"
-            onClick={handleGoogleSignUp}
-            color="secondary"
-            sx={{ fontFamily: "'Poppins', sans-serif" }}
-            disabled={loading || !agreeToTerms}
-            aria-label="Sign up with Google"
-          >
-            Sign Up with Google
-          </Button>
-        </Stack>
-      </Paper>
-    </Container>
-  );
-}
-
-export default SignupPage;
+  

@@ -5,7 +5,6 @@
    import {
      collection, onSnapshot, addDoc, deleteDoc, doc,
    } from "firebase/firestore";
-   
    import {
      Card, CardContent, Typography, Table, TableBody, TableCell,
      TableHead, TableRow, Button, Alert, CircularProgress,
@@ -13,41 +12,31 @@
    } from "@mui/material";
    
    import { getDb, getAnalyticsService } from "../../../firebase/config";
-   import { logEvent }                     from "firebase/analytics";
-   import { fetchSchedule }                from "../../../utils/sportsRadar";
+   import { logEvent }       from "firebase/analytics";
+   import { fetchSchedule }  from "../../../utils/sportsRadar";
    
    export default function CommissionerMatchupsSection({
      user,            // firebase user
      poolId,          // string
      poolData,        // pool document
    }) {
-     /* ────────────────────────────────────────────────────────────
-        1.  HOOKS (always at top)
-        ─────────────────────────────────────────────────────────── */
-     const [games,      setGames]      = useState([]);  // schedule API
-     const [matchups,   setMatchups]   = useState([]);  // firestore
+     /* ─────────────────────────── 1 · state ─────────────────────────── */
+     const [games,      setGames]      = useState([]);      // schedule API
+     const [matchups,   setMatchups]   = useState([]);      // firestore listener
      const [loadingAPI, setLoadingAPI] = useState(false);
      const [loadingFB,  setLoadingFB]  = useState(true);
+     const [message,    setMessage]    = useState("");      // success snackbar
+     const [error,      setError]      = useState("");      // error banner
    
-     const [message,    setMessage]    = useState("");  // success snackbar
-     const [error,      setError]      = useState("");  // error alert
-   
-     /* ────────────────────────────────────────────────────────────
-        2.  DERIVED VALUES
-        ─────────────────────────────────────────────────────────── */
+     /* ───────────────────────── 2 · derived ─────────────────────────── */
      const db             = getDb();
      const analytics      = getAnalyticsService();
      const isCommissioner = poolData?.commissionerId === user?.uid;
    
-     /* ────────────────────────────────────────────────────────────
-        3.  EARLY RETURN  (after hooks, so ESLint is happy)
-        ─────────────────────────────────────────────────────────── */
-     if (!isCommissioner) return null;
-   
-     /* ────────────────────────────────────────────────────────────
-        4.  REAL-TIME LISTENER ⇒ existing matchups
-        ─────────────────────────────────────────────────────────── */
+     /* ──────────────────── 3 · firestore listener ───────────────────── */
      useEffect(() => {
+       if (!isCommissioner) return;        // skip listener for non-commish
+   
        const unsub = onSnapshot(
          collection(db, "pools", poolId, "matchups"),
          (snap) => {
@@ -60,16 +49,20 @@
            setLoadingFB(false);
          }
        );
+   
        return () => unsub();
-     }, [db, poolId]);
+     }, [db, poolId, isCommissioner]);
    
-     /* ────────────────────────────────────────────────────────────
-        5.  FETCH UPCOMING GAMES (Sportradar helper)
-        ─────────────────────────────────────────────────────────── */
+     /* ───────────────────── 4 · schedule fetch ──────────────────────── */
      useEffect(() => {
-       if (!poolData?.sport || !poolData?.season) return;
+       if (
+         !isCommissioner ||
+         !poolData?.sport ||
+         !poolData?.season
+       )
+         return;
    
-       const fetchGames = async () => {
+       (async () => {
          setLoadingAPI(true);
          try {
            const upcoming = await fetchSchedule(
@@ -83,14 +76,10 @@
          } finally {
            setLoadingAPI(false);
          }
-       };
+       })();
+     }, [isCommissioner, poolData?.sport, poolData?.season]);
    
-       fetchGames();
-     }, [poolData?.sport, poolData?.season]);
-   
-     /* ────────────────────────────────────────────────────────────
-        6.  HANDLERS
-        ─────────────────────────────────────────────────────────── */
+     /* ───────────────────── 5 · handlers ────────────────────────────── */
      const handleAddGame = async (game) => {
        setError(""); setMessage("");
        try {
@@ -102,7 +91,6 @@
            status   : "pending",
          };
          await addDoc(collection(db, "pools", poolId, "matchups"), matchup);
-   
          setMessage(`Added: ${matchup.awayTeam} @ ${matchup.homeTeam}`);
    
          analytics && logEvent(analytics, "add_matchup", {
@@ -129,37 +117,37 @@
        }
      };
    
-     /* ────────────────────────────────────────────────────────────
-        7.  UI
-        ─────────────────────────────────────────────────────────── */
+     /* ───────────────────── 6 · render ──────────────────────────────── */
+     if (!isCommissioner) return null;          // finally hide the whole card
+   
      return (
-       <Card sx={{ mb:3, borderRadius:2, boxShadow:3 }}>
+       <Card sx={{ mb: 3, borderRadius: 2, boxShadow: 3 }}>
          <CardContent>
-           <Typography variant="h6" sx={{ mb:2, fontWeight:600 }}>
+           <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
              Matchups&nbsp;Management
            </Typography>
    
-           {error && <Alert severity="error" sx={{ mb:2 }}>{error}</Alert>}
+           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
    
            <Snackbar
              open={!!message}
              autoHideDuration={3000}
              onClose={() => setMessage("")}
-             anchorOrigin={{ vertical:"top", horizontal:"center" }}
+             anchorOrigin={{ vertical: "top", horizontal: "center" }}
            >
              <Alert severity="success">{message}</Alert>
            </Snackbar>
    
-           {/* ── Upcoming Games ─────────────────────────────────── */}
-           <Box sx={{ mb:4 }}>
-             <Typography variant="subtitle1" sx={{ mb:1, fontWeight:500 }}>
+           {/* ───────── Upcoming Games ───────── */}
+           <Box sx={{ mb: 4 }}>
+             <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
                Upcoming Games — {poolData.sport} {poolData.season}
              </Typography>
    
              {loadingAPI ? (
-               <Box sx={{ textAlign:"center" }}>
+               <Box sx={{ textAlign: "center" }}>
                  <CircularProgress />
-                 <Typography sx={{ mt:1 }}>Fetching games…</Typography>
+                 <Typography sx={{ mt: 1 }}>Fetching games…</Typography>
                </Box>
              ) : games.length === 0 ? (
                <Alert severity="info">No games found.</Alert>
@@ -198,9 +186,9 @@
              )}
            </Box>
    
-           {/* ── Existing Matchups ───────────────────────────────── */}
+           {/* ───────── Existing Matchups ───────── */}
            <Box>
-             <Typography variant="subtitle1" sx={{ mb:1, fontWeight:500 }}>
+             <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
                Matchups&nbsp;in&nbsp;Your&nbsp;Pool
              </Typography>
    
@@ -213,7 +201,7 @@
                  <TableHead>
                    <TableRow>
                      <TableCell>ID</TableCell>
-                     <TableCell>Home vs&nbsp;Away</TableCell>
+                     <TableCell>Home&nbsp;vs&nbsp;Away</TableCell>
                      <TableCell>Start</TableCell>
                      <TableCell>Status</TableCell>
                      <TableCell align="right">Remove</TableCell>
@@ -225,7 +213,9 @@
                        <TableCell>{m.id}</TableCell>
                        <TableCell>{m.homeTeam} vs {m.awayTeam}</TableCell>
                        <TableCell>
-                         {m.startTime ? new Date(m.startTime).toLocaleString() : "—"}
+                         {m.startTime
+                           ? new Date(m.startTime).toLocaleString()
+                           : "—"}
                        </TableCell>
                        <TableCell>{m.status}</TableCell>
                        <TableCell align="right">
